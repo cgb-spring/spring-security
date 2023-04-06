@@ -31,11 +31,12 @@ import org.apache.commons.logging.LogFactory;
 import org.springframework.core.convert.ConversionService;
 import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.acls.domain.ObjectIdentityImpl;
+import org.springframework.security.acls.domain.ObjectIdentityRetrievalStrategyImpl;
 import org.springframework.security.acls.model.Acl;
 import org.springframework.security.acls.model.AclService;
 import org.springframework.security.acls.model.NotFoundException;
 import org.springframework.security.acls.model.ObjectIdentity;
+import org.springframework.security.acls.model.ObjectIdentityGenerator;
 import org.springframework.security.acls.model.Sid;
 import org.springframework.util.Assert;
 
@@ -81,6 +82,8 @@ public class JdbcAclService implements AclService {
 
 	private AclClassIdUtils aclClassIdUtils;
 
+	private ObjectIdentityGenerator objectIdentityGenerator;
+
 	public JdbcAclService(DataSource dataSource, LookupStrategy lookupStrategy) {
 		this(new JdbcTemplate(dataSource), lookupStrategy);
 	}
@@ -91,6 +94,7 @@ public class JdbcAclService implements AclService {
 		this.jdbcOperations = jdbcOperations;
 		this.lookupStrategy = lookupStrategy;
 		this.aclClassIdUtils = new AclClassIdUtils();
+		this.objectIdentityGenerator = new ObjectIdentityRetrievalStrategyImpl();
 	}
 
 	@Override
@@ -105,7 +109,7 @@ public class JdbcAclService implements AclService {
 		String javaType = rs.getString("class");
 		Serializable identifier = (Serializable) rs.getObject("obj_id");
 		identifier = this.aclClassIdUtils.identifierFrom(identifier, rs);
-		return new ObjectIdentityImpl(javaType, identifier);
+		return this.objectIdentityGenerator.createObjectIdentity(identifier, javaType);
 	}
 
 	@Override
@@ -163,6 +167,11 @@ public class JdbcAclService implements AclService {
 
 	public void setConversionService(ConversionService conversionService) {
 		this.aclClassIdUtils = new AclClassIdUtils(conversionService);
+	}
+
+	public void setObjectIdentityGenerator(ObjectIdentityGenerator objectIdentityGenerator) {
+		Assert.notNull(objectIdentityGenerator, "objectIdentityGenerator cannot be null");
+		this.objectIdentityGenerator = objectIdentityGenerator;
 	}
 
 	protected boolean isAclClassIdSupported() {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2017 the original author or authors.
+ * Copyright 2002-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,11 +16,14 @@
 
 package org.springframework.security.web.server.header;
 
+import java.util.Locale;
+
 import org.junit.jupiter.api.Test;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
+import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.web.server.ServerWebExchange;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -54,6 +57,24 @@ public class StaticServerHttpHeadersWriterTests {
 		this.writer.writeHttpHeaders(this.exchange);
 		assertThat(this.headers.get(ContentTypeOptionsServerHttpHeadersWriter.X_CONTENT_OPTIONS))
 				.containsOnly(headerValue);
+	}
+
+	// gh-10557
+	@Test
+	public void writeHeadersWhenHeaderWrittenWithDifferentCaseThenDoesNotWriteHeaders() {
+		String headerName = HttpHeaders.CACHE_CONTROL.toLowerCase(Locale.ROOT);
+		String headerValue = "max-age=120";
+		this.headers.set(headerName, headerValue);
+		// Note: This test inverts which collection uses case sensitive headers,
+		// due to the fact that gh-10557 reports NettyHeadersAdapter as the
+		// response headers implementation, which is not accessible here.
+		HttpHeaders caseSensitiveHeaders = new HttpHeaders(new LinkedMultiValueMap<>());
+		caseSensitiveHeaders.set(HttpHeaders.CACHE_CONTROL, CacheControlServerHttpHeadersWriter.CACHE_CONTRTOL_VALUE);
+		caseSensitiveHeaders.set(HttpHeaders.PRAGMA, CacheControlServerHttpHeadersWriter.PRAGMA_VALUE);
+		caseSensitiveHeaders.set(HttpHeaders.EXPIRES, CacheControlServerHttpHeadersWriter.EXPIRES_VALUE);
+		this.writer = new StaticServerHttpHeadersWriter(caseSensitiveHeaders);
+		this.writer.writeHttpHeaders(this.exchange);
+		assertThat(this.headers.get(headerName)).containsOnly(headerValue);
 	}
 
 	@Test

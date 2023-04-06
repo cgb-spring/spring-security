@@ -21,17 +21,18 @@ import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.context.ApplicationContext
 import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity
-import org.springframework.security.core.userdetails.MapReactiveUserDetailsService
-import org.springframework.security.core.userdetails.User
 import org.springframework.security.config.test.SpringTestContext
 import org.springframework.security.config.test.SpringTestContextExtension
+import org.springframework.security.core.userdetails.MapReactiveUserDetailsService
+import org.springframework.security.core.userdetails.User
 import org.springframework.security.web.server.SecurityWebFilterChain
 import org.springframework.test.web.reactive.server.WebTestClient
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.reactive.config.EnableWebFlux
-import java.util.*
+import java.util.Base64
 
 /**
  * Tests for [AuthorizeExchangeDsl]
@@ -63,6 +64,7 @@ class AuthorizeExchangeDslTests {
                 .expectStatus().isUnauthorized
     }
 
+    @Configuration
     @EnableWebFluxSecurity
     @EnableWebFlux
     open class MatcherAuthenticatedConfig {
@@ -86,6 +88,7 @@ class AuthorizeExchangeDslTests {
                 .expectStatus().isOk
     }
 
+    @Configuration
     @EnableWebFluxSecurity
     @EnableWebFlux
     open class MatcherPermitAllConfig {
@@ -126,6 +129,7 @@ class AuthorizeExchangeDslTests {
                 .expectStatus().isOk
     }
 
+    @Configuration
     @EnableWebFluxSecurity
     @EnableWebFlux
     open class PatternAuthenticatedConfig {
@@ -158,6 +162,7 @@ class AuthorizeExchangeDslTests {
                 .expectStatus().isForbidden
     }
 
+    @Configuration
     @EnableWebFluxSecurity
     @EnableWebFlux
     open class HasRoleConfig {
@@ -178,6 +183,43 @@ class AuthorizeExchangeDslTests {
                     .password("password")
                     .roles("USER")
                     .build()
+            return MapReactiveUserDetailsService(user)
+        }
+    }
+
+    @Test
+    fun `request when ip address does not match then responds with forbidden`() {
+        this.spring.register(HasIpAddressConfig::class.java).autowire()
+
+        this.client
+            .get()
+            .uri("/")
+            .header("Authorization", "Basic " + Base64.getEncoder().encodeToString("user:password".toByteArray()))
+            .exchange()
+            .expectStatus().isForbidden
+    }
+
+    @Configuration
+    @EnableWebFluxSecurity
+    @EnableWebFlux
+    open class HasIpAddressConfig {
+        @Bean
+        open fun springWebFilterChain(http: ServerHttpSecurity): SecurityWebFilterChain {
+            return http {
+                authorizeExchange {
+                    authorize(anyExchange, hasIpAddress("10.0.0.0/24"))
+                }
+                httpBasic { }
+            }
+        }
+
+        @Bean
+        open fun userDetailsService(): MapReactiveUserDetailsService {
+            val user = User.withDefaultPasswordEncoder()
+                .username("user")
+                .password("password")
+                .roles("USER")
+                .build()
             return MapReactiveUserDetailsService(user)
         }
     }

@@ -1,16 +1,114 @@
 [[servlet-saml2login-authenticate-responses]]
 = Authenticating ``<saml2:Response>``s
 
-To verify SAML 2.0 Responses, Spring Security uses xref:servlet/saml2/login/overview.adoc#servlet-saml2login-architecture[`OpenSaml4AuthenticationProvider`] by default.
+To verify SAML 2.0 Responses, Spring Security uses xref:servlet/saml2/login/overview.adoc#servlet-saml2login-authentication-saml2authenticationtokenconverter[`Saml2AuthenticationTokenConverter`] to populate the `Authentication` request and xref:servlet/saml2/login/overview.adoc#servlet-saml2login-architecture[`OpenSaml4AuthenticationProvider`] to authenticate it.
 
 You can configure this in a number of ways including:
 
-1. Setting a clock skew to timestamp validation
-2. Mapping the response to a list of `GrantedAuthority` instances
-3. Customizing the strategy for validating assertions
-4. Customizing the strategy for decrypting response and assertion elements
+1. Changing the way the `RelyingPartyRegistration` is Looked Up
+2. Setting a clock skew to timestamp validation
+3. Mapping the response to a list of `GrantedAuthority` instances
+4. Customizing the strategy for validating assertions
+5. Customizing the strategy for decrypting response and assertion elements
 
 To configure these, you'll use the `saml2Login#authenticationManager` method in the DSL.
+
+[[saml2-response-processing-endpoint]]
+== Changing the SAML Response Processing Endpoint
+
+The default endpoint is `+/login/saml2/sso/{registrationId}+`.
+You can change this in the DSL and in the associated metadata like so:
+
+====
+.Java
+[source,java,role="primary"]
+----
+@Bean
+SecurityFilterChain securityFilters(HttpSecurity http) throws Exception {
+	http
+        // ...
+        .saml2Login((saml2) -> saml2.filterProcessingUrl("/saml2/login/sso"))
+        // ...
+
+    return http.build();
+}
+----
+
+.Kotlin
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun securityFilters(val http: HttpSecurity): SecurityFilterChain {
+	http {
+        // ...
+        .saml2Login {
+            filterProcessingUrl = "/saml2/login/sso"
+        }
+        // ...
+    }
+
+    return http.build()
+}
+----
+====
+
+and:
+
+====
+.Java
+[source,java,role="primary"]
+----
+relyingPartyRegistrationBuilder.assertionConsumerServiceLocation("/saml/SSO")
+----
+
+.Kotlin
+[source,kotlin,role="secondary"]
+----
+relyingPartyRegistrationBuilder.assertionConsumerServiceLocation("/saml/SSO")
+----
+====
+
+[[relyingpartyregistrationresolver-apply]]
+== Changing `RelyingPartyRegistration` lookup
+
+By default, this converter will match against any associated `<saml2:AuthnRequest>` or any `registrationId` it finds in the URL.
+Or, if it cannot find one in either of those cases, then it attempts to look it up by the `<saml2:Response#Issuer>` element.
+
+There are a number of circumstances where you might need something more sophisticated, like if you are supporting `ARTIFACT` binding.
+In those cases, you can customize lookup through a custom `AuthenticationConverter`, which you can customize like so:
+
+====
+.Java
+[source,java,role="primary"]
+----
+@Bean
+SecurityFilterChain securityFilters(HttpSecurity http, AuthenticationConverter authenticationConverter) throws Exception {
+	http
+        // ...
+        .saml2Login((saml2) -> saml2.authenticationConverter(authenticationConverter))
+        // ...
+
+    return http.build();
+}
+----
+
+.Kotlin
+[source,kotlin,role="secondary"]
+----
+@Bean
+fun securityFilters(val http: HttpSecurity, val converter: AuthenticationConverter): SecurityFilterChain {
+	http {
+        // ...
+        .saml2Login {
+            authenticationConverter = converter
+        }
+        // ...
+    }
+
+    return http.build()
+}
+----
+====
 
 [[servlet-saml2login-opensamlauthenticationprovider-clockskew]]
 == Setting a Clock Skew
@@ -22,11 +120,12 @@ For that reason, you can configure `OpenSaml4AuthenticationProvider` 's default 
 .Java
 [source,java,role="primary"]
 ----
+@Configuration
 @EnableWebSecurity
-public class SecurityConfig extends WebSecurityConfigurerAdapter {
+public class SecurityConfig {
 
-    @Override
-    protected void configure(HttpSecurity http) throws Exception {
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         OpenSaml4AuthenticationProvider authenticationProvider = new OpenSaml4AuthenticationProvider();
         authenticationProvider.setAssertionValidator(OpenSaml4AuthenticationProvider
                 .createDefaultAssertionValidator(assertionToken -> {
@@ -44,6 +143,7 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
             .saml2Login(saml2 -> saml2
                 .authenticationManager(new ProviderManager(authenticationProvider))
             );
+        return http.build();
     }
 }
 ----
@@ -51,9 +151,11 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
 .Kotlin
 [source,kotlin,role="secondary"]
 ----
+@Configuration
 @EnableWebSecurity
-open class SecurityConfig : WebSecurityConfigurerAdapter() {
-    override fun configure(http: HttpSecurity) {
+open class SecurityConfig {
+    @Bean
+    open fun filterChain(http: HttpSecurity): SecurityFilterChain {
         val authenticationProvider = OpenSaml4AuthenticationProvider()
         authenticationProvider.setAssertionValidator(
             OpenSaml4AuthenticationProvider
@@ -72,6 +174,7 @@ open class SecurityConfig : WebSecurityConfigurerAdapter() {
                 authenticationManager = ProviderManager(authenticationProvider)
             }
         }
+        return http.build()
     }
 }
 ----
@@ -87,13 +190,14 @@ In that case, the response authentication converter can come in handy, as can be
 .Java
 [source,java,role="primary"]
 ----
+@Configuration
 @EnableWebSecurity
-public class SecurityConfig extends WebSecurityConfigurerAdapter {
+public class SecurityConfig {
     @Autowired
     UserDetailsService userDetailsService;
 
-    @Override
-    protected void configure(HttpSecurity http) throws Exception {
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         OpenSaml4AuthenticationProvider authenticationProvider = new OpenSaml4AuthenticationProvider();
         authenticationProvider.setResponseAuthenticationConverter(responseToken -> {
             Saml2Authentication authentication = OpenSaml4AuthenticationProvider
@@ -112,6 +216,7 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
             .saml2Login(saml2 -> saml2
                 .authenticationManager(new ProviderManager(authenticationProvider))
             );
+        return http.build();
     }
 }
 ----
@@ -119,12 +224,14 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
 .Kotlin
 [source,kotlin,role="secondary"]
 ----
+@Configuration
 @EnableWebSecurity
-open class SecurityConfig : WebSecurityConfigurerAdapter() {
+open class SecurityConfig {
     @Autowired
     var userDetailsService: UserDetailsService? = null
 
-    override fun configure(http: HttpSecurity) {
+    @Bean
+    open fun filterChain(http: HttpSecurity): SecurityFilterChain {
         val authenticationProvider = OpenSaml4AuthenticationProvider()
         authenticationProvider.setResponseAuthenticationConverter { responseToken: OpenSaml4AuthenticationProvider.ResponseToken ->
             val authentication = OpenSaml4AuthenticationProvider
@@ -143,6 +250,7 @@ open class SecurityConfig : WebSecurityConfigurerAdapter() {
                 authenticationManager = ProviderManager(authenticationProvider)
             }
         }
+        return http.build()
     }
 }
 ----
@@ -303,11 +411,12 @@ This authentication manager should expect a `Saml2AuthenticationToken` object co
 .Java
 [source,java,role="primary"]
 ----
+@Configuration
 @EnableWebSecurity
-public class SecurityConfig extends WebSecurityConfigurerAdapter {
+public class SecurityConfig {
 
-    @Override
-    protected void configure(HttpSecurity http) throws Exception {
+    @Bean
+	public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         AuthenticationManager authenticationManager = new MySaml2AuthenticationManager(...);
         http
             .authorizeHttpRequests(authorize -> authorize
@@ -317,6 +426,7 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
                 .authenticationManager(authenticationManager)
             )
         ;
+        return http.build();
     }
 }
 ----
@@ -324,9 +434,11 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
 .Kotlin
 [source,kotlin,role="secondary"]
 ----
+@Configuration
 @EnableWebSecurity
-open class SecurityConfig : WebSecurityConfigurerAdapter() {
-    override fun configure(http: HttpSecurity) {
+open class SecurityConfig {
+    @Bean
+    open fun filterChain(http: HttpSecurity): SecurityFilterChain {
         val customAuthenticationManager: AuthenticationManager = MySaml2AuthenticationManager(...)
         http {
             authorizeRequests {
@@ -336,6 +448,7 @@ open class SecurityConfig : WebSecurityConfigurerAdapter() {
                 authenticationManager = customAuthenticationManager
             }
         }
+        return http.build()
     }
 }
 ----

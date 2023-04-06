@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2021 the original author or authors.
+ * Copyright 2002-2022 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import java.util.UUID;
 import java.util.function.BiConsumer;
 
 import jakarta.servlet.http.HttpServletRequest;
-
 import net.shibboleth.utilities.java.support.xml.ParserPool;
 import net.shibboleth.utilities.java.support.xml.SerializeSupport;
 import org.apache.commons.logging.Log;
@@ -52,7 +51,10 @@ import org.springframework.security.saml2.core.Saml2ParameterNames;
 import org.springframework.security.saml2.provider.service.authentication.Saml2AuthenticatedPrincipal;
 import org.springframework.security.saml2.provider.service.authentication.logout.Saml2LogoutResponse;
 import org.springframework.security.saml2.provider.service.registration.RelyingPartyRegistration;
+import org.springframework.security.saml2.provider.service.registration.RelyingPartyRegistrationRepository;
 import org.springframework.security.saml2.provider.service.registration.Saml2MessageBinding;
+import org.springframework.security.saml2.provider.service.web.RelyingPartyRegistrationPlaceholderResolvers;
+import org.springframework.security.saml2.provider.service.web.RelyingPartyRegistrationPlaceholderResolvers.UriResolver;
 import org.springframework.security.saml2.provider.service.web.RelyingPartyRegistrationResolver;
 import org.springframework.security.saml2.provider.service.web.authentication.logout.OpenSamlSigningUtils.QueryParametersPartial;
 import org.springframework.util.Assert;
@@ -83,12 +85,16 @@ final class OpenSamlLogoutResponseResolver {
 
 	private final StatusCodeBuilder statusCodeBuilder;
 
+	private final RelyingPartyRegistrationRepository registrations;
+
 	private final RelyingPartyRegistrationResolver relyingPartyRegistrationResolver;
 
 	/**
 	 * Construct a {@link OpenSamlLogoutResponseResolver}
 	 */
-	OpenSamlLogoutResponseResolver(RelyingPartyRegistrationResolver relyingPartyRegistrationResolver) {
+	OpenSamlLogoutResponseResolver(RelyingPartyRegistrationRepository registrations,
+			RelyingPartyRegistrationResolver relyingPartyRegistrationResolver) {
+		this.registrations = registrations;
 		this.relyingPartyRegistrationResolver = relyingPartyRegistrationResolver;
 		XMLObjectProviderRegistry registry = ConfigurationService.get(XMLObjectProviderRegistry.class);
 		this.parserPool = registry.getParserPool();
@@ -127,18 +133,25 @@ final class OpenSamlLogoutResponseResolver {
 
 	Saml2LogoutResponse resolve(HttpServletRequest request, Authentication authentication,
 			BiConsumer<RelyingPartyRegistration, LogoutResponse> logoutResponseConsumer) {
+		LogoutRequest logoutRequest = parse(extractSamlRequest(request));
 		String registrationId = getRegistrationId(authentication);
 		RelyingPartyRegistration registration = this.relyingPartyRegistrationResolver.resolve(request, registrationId);
+		if (registration == null && this.registrations != null) {
+			String issuer = logoutRequest.getIssuer().getValue();
+			registration = this.registrations.findUniqueByAssertingPartyEntityId(issuer);
+		}
 		if (registration == null) {
 			return null;
 		}
-		String serialized = request.getParameter(Saml2ParameterNames.SAML_REQUEST);
-		byte[] b = Saml2Utils.samlDecode(serialized);
-		LogoutRequest logoutRequest = parse(inflateIfRequired(registration, b));
+		if (registration.getAssertingPartyDetails().getSingleLogoutServiceResponseLocation() == null) {
+			return null;
+		}
+		UriResolver uriResolver = RelyingPartyRegistrationPlaceholderResolvers.uriResolver(request, registration);
+		String entityId = uriResolver.resolve(registration.getEntityId());
 		LogoutResponse logoutResponse = this.logoutResponseBuilder.buildObject();
 		logoutResponse.setDestination(registration.getAssertingPartyDetails().getSingleLogoutServiceResponseLocation());
 		Issuer issuer = this.issuerBuilder.buildObject();
-		issuer.setValue(registration.getEntityId());
+		issuer.setValue(entityId);
 		logoutResponse.setIssuer(issuer);
 		StatusCode code = this.statusCodeBuilder.buildObject();
 		code.setValue(StatusCode.SUCCESS);
@@ -187,8 +200,10 @@ final class OpenSamlLogoutResponseResolver {
 		return null;
 	}
 
-	private String inflateIfRequired(RelyingPartyRegistration registration, byte[] b) {
-		if (registration.getSingleLogoutServiceBinding() == Saml2MessageBinding.REDIRECT) {
+	private String extractSamlRequest(HttpServletRequest request) {
+		String serialized = request.getParameter(Saml2ParameterNames.SAML_REQUEST);
+		byte[] b = Saml2Utils.samlDecode(serialized);
+		if (Saml2MessageBindingUtils.isHttpRedirectBinding(request)) {
 			return Saml2Utils.samlInflate(b);
 		}
 		return new String(b, StandardCharsets.UTF_8);

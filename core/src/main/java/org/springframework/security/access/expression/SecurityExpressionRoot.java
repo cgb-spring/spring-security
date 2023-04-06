@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2016 the original author or authors.
+ * Copyright 2002-2023 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ package org.springframework.security.access.expression;
 import java.io.Serializable;
 import java.util.Collection;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import org.springframework.security.access.PermissionEvaluator;
 import org.springframework.security.access.hierarchicalroles.RoleHierarchy;
@@ -26,16 +27,19 @@ import org.springframework.security.authentication.AuthenticationTrustResolver;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.AuthorityUtils;
+import org.springframework.util.Assert;
+import org.springframework.util.function.SingletonSupplier;
 
 /**
  * Base root object for use in Spring Security expression evaluations.
  *
  * @author Luke Taylor
+ * @author Evgeniy Cheban
  * @since 3.0
  */
 public abstract class SecurityExpressionRoot implements SecurityExpressionOperations {
 
-	protected final Authentication authentication;
+	private final Supplier<Authentication> authentication;
 
 	private AuthenticationTrustResolver trustResolver;
 
@@ -72,10 +76,22 @@ public abstract class SecurityExpressionRoot implements SecurityExpressionOperat
 	 * @param authentication the {@link Authentication} to use. Cannot be null.
 	 */
 	public SecurityExpressionRoot(Authentication authentication) {
-		if (authentication == null) {
-			throw new IllegalArgumentException("Authentication object cannot be null");
-		}
-		this.authentication = authentication;
+		this(() -> authentication);
+	}
+
+	/**
+	 * Creates a new instance that uses lazy initialization of the {@link Authentication}
+	 * object.
+	 * @param authentication the {@link Supplier} of the {@link Authentication} to use.
+	 * Cannot be null.
+	 * @since 5.8
+	 */
+	public SecurityExpressionRoot(Supplier<Authentication> authentication) {
+		this.authentication = SingletonSupplier.of(() -> {
+			Authentication value = authentication.get();
+			Assert.notNull(value, "Authentication object cannot be null");
+			return value;
+		});
 	}
 
 	@Override
@@ -111,7 +127,7 @@ public abstract class SecurityExpressionRoot implements SecurityExpressionOperat
 
 	@Override
 	public final Authentication getAuthentication() {
-		return this.authentication;
+		return this.authentication.get();
 	}
 
 	@Override
@@ -126,7 +142,7 @@ public abstract class SecurityExpressionRoot implements SecurityExpressionOperat
 
 	@Override
 	public final boolean isAnonymous() {
-		return this.trustResolver.isAnonymous(this.authentication);
+		return this.trustResolver.isAnonymous(getAuthentication());
 	}
 
 	@Override
@@ -136,13 +152,13 @@ public abstract class SecurityExpressionRoot implements SecurityExpressionOperat
 
 	@Override
 	public final boolean isRememberMe() {
-		return this.trustResolver.isRememberMe(this.authentication);
+		return this.trustResolver.isRememberMe(getAuthentication());
 	}
 
 	@Override
 	public final boolean isFullyAuthenticated() {
-		return !this.trustResolver.isAnonymous(this.authentication)
-				&& !this.trustResolver.isRememberMe(this.authentication);
+		Authentication authentication = getAuthentication();
+		return this.trustResolver.isFullyAuthenticated(authentication);
 	}
 
 	/**
@@ -151,7 +167,7 @@ public abstract class SecurityExpressionRoot implements SecurityExpressionOperat
 	 * @return
 	 */
 	public Object getPrincipal() {
-		return this.authentication.getPrincipal();
+		return getAuthentication().getPrincipal();
 	}
 
 	public void setTrustResolver(AuthenticationTrustResolver trustResolver) {
@@ -181,7 +197,7 @@ public abstract class SecurityExpressionRoot implements SecurityExpressionOperat
 
 	private Set<String> getAuthoritySet() {
 		if (this.roles == null) {
-			Collection<? extends GrantedAuthority> userAuthorities = this.authentication.getAuthorities();
+			Collection<? extends GrantedAuthority> userAuthorities = getAuthentication().getAuthorities();
 			if (this.roleHierarchy != null) {
 				userAuthorities = this.roleHierarchy.getReachableGrantedAuthorities(userAuthorities);
 			}
@@ -192,12 +208,12 @@ public abstract class SecurityExpressionRoot implements SecurityExpressionOperat
 
 	@Override
 	public boolean hasPermission(Object target, Object permission) {
-		return this.permissionEvaluator.hasPermission(this.authentication, target, permission);
+		return this.permissionEvaluator.hasPermission(getAuthentication(), target, permission);
 	}
 
 	@Override
 	public boolean hasPermission(Object targetId, String targetType, Object permission) {
-		return this.permissionEvaluator.hasPermission(this.authentication, (Serializable) targetId, targetType,
+		return this.permissionEvaluator.hasPermission(getAuthentication(), (Serializable) targetId, targetType,
 				permission);
 	}
 

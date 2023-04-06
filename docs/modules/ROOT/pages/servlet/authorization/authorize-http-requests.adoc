@@ -48,12 +48,10 @@ image::{figures}/authorizationfilter.png[]
 
 * image:{icondir}/number_1.png[] First, the `AuthorizationFilter` obtains an  xref:servlet/authentication/architecture.adoc#servlet-authentication-authentication[Authentication] from the xref:servlet/authentication/architecture.adoc#servlet-authentication-securitycontextholder[SecurityContextHolder].
 It wraps this in an `Supplier` in order to delay lookup.
-* image:{icondir}/number_2.png[] Second, `AuthorizationFilter` creates a {security-api-url}org/springframework/security/web/FilterInvocation.html[`FilterInvocation`] from the `HttpServletRequest`, `HttpServletResponse`, and `FilterChain`.
-// FIXME: link to FilterInvocation
-* image:{icondir}/number_3.png[] Next, it passes the `Supplier<Authentication>` and `FilterInvocation` to the xref:servlet/architecture.adoc#authz-authorization-manager[`AuthorizationManager`].
-** image:{icondir}/number_4.png[] If authorization is denied, an `AccessDeniedException` is thrown.
+* image:{icondir}/number_2.png[] Second, it passes the `Supplier<Authentication>` and the `HttpServletRequest` to the xref:servlet/architecture.adoc#authz-authorization-manager[`AuthorizationManager`].
+** image:{icondir}/number_3.png[] If authorization is denied, an `AccessDeniedException` is thrown.
 In this case the xref:servlet/architecture.adoc#servlet-exceptiontranslationfilter[`ExceptionTranslationFilter`] handles the `AccessDeniedException`.
-** image:{icondir}/number_5.png[] If access is granted, `AuthorizationFilter` continues with the xref:servlet/architecture.adoc#servlet-filters-review[FilterChain] which allows the application to process normally.
+** image:{icondir}/number_4.png[] If access is granted, `AuthorizationFilter` continues with the xref:servlet/architecture.adoc#servlet-filters-review[FilterChain] which allows the application to process normally.
 
 We can configure Spring Security to have different rules by adding more rules in order of precedence.
 
@@ -67,10 +65,11 @@ SecurityFilterChain web(HttpSecurity http) throws Exception {
 	http
 		// ...
 		.authorizeHttpRequests(authorize -> authorize                                  // <1>
-			.mvcMatchers("/resources/**", "/signup", "/about").permitAll()         // <2>
-			.mvcMatchers("/admin/**").hasRole("ADMIN")                             // <3>
-			.mvcMatchers("/db/**").access("hasRole('ADMIN') and hasRole('DBA')")   // <4>
-			.anyRequest().denyAll()                                                // <5>
+			.requestMatchers("/resources/**", "/signup", "/about").permitAll()         // <2>
+			.requestMatchers("/admin/**").hasRole("ADMIN")                             // <3>
+			.requestMatchers("/db/**").access(new WebExpressionAuthorizationManager("hasRole('ADMIN') and hasRole('DBA')"))   // <4>
+			// .requestMatchers("/db/**").access(AuthorizationManagers.allOf(AuthorityAuthorizationManager.hasRole("ADMIN"), AuthorityAuthorizationManager.hasRole("DBA")))   // <5>
+			.anyRequest().denyAll()                                                // <6>
 		);
 
 	return http.build();
@@ -85,7 +84,8 @@ Specifically, any user can access a request if the URL starts with "/resources/"
 You will notice that since we are invoking the `hasRole` method we do not need to specify the "ROLE_" prefix.
 <4> Any URL that starts with "/db/" requires the user to have both "ROLE_ADMIN" and "ROLE_DBA".
 You will notice that since we are using the `hasRole` expression we do not need to specify the "ROLE_" prefix.
-<5> Any URL that has not already been matched on is denied access.
+<5> The same rule from 4, could be written by combining multiple `AuthorizationManager`.
+<6> Any URL that has not already been matched on is denied access.
 This is a good strategy if you do not want to accidentally forget to update your authorization rules.
 
 You can take a bean-based approach by constructing your own xref:servlet/authorization/architecture.adoc#authz-delegate-authorization-manager[`RequestMatcherDelegatingAuthorizationManager`] like so:
@@ -109,15 +109,16 @@ SecurityFilterChain web(HttpSecurity http, AuthorizationManager<RequestAuthoriza
 
 @Bean
 AuthorizationManager<RequestAuthorizationContext> requestMatcherAuthorizationManager(HandlerMappingIntrospector introspector) {
+    MvcRequestMatcher.Builder mvcMatcherBuilder = new MvcRequestMatcher.Builder(introspector);
     RequestMatcher permitAll =
             new AndRequestMatcher(
-                    new MvcRequestMatcher(introspector, "/resources/**"),
-                    new MvcRequestMatcher(introspector, "/signup"),
-                    new MvcRequestMatcher(introspector, "/about"));
-    RequestMatcher admin = new MvcRequestMatcher(introspector, "/admin/**");
-    RequestMatcher db = new MvcRequestMatcher(introspector, "/db/**");
+                    mvcMatcherBuilder.pattern("/resources/**"),
+                    mvcMatcherBuilder.pattern("/signup"),
+                    mvcMatcherBuilder.pattern("/about"));
+    RequestMatcher admin = mvcMatcherBuilder.pattern("/admin/**");
+    RequestMatcher db = mvcMatcherBuilder.pattern("/db/**");
     RequestMatcher any = AnyRequestMatcher.INSTANCE;
-    AuthorizationManager<HttpRequestServlet> manager = RequestMatcherDelegatingAuthorizationManager.builder()
+    AuthorizationManager<HttpServletRequest> manager = RequestMatcherDelegatingAuthorizationManager.builder()
             .add(permitAll, (context) -> new AuthorizationDecision(true))
             .add(admin, AuthorityAuthorizationManager.hasRole("ADMIN"))
             .add(db, AuthorityAuthorizationManager.hasRole("DBA"))
@@ -141,7 +142,7 @@ Here is an example of mapping a custom authorization manager to the `my/authoriz
 SecurityFilterChain web(HttpSecurity http) throws Exception {
     http
         .authorizeHttpRequests((authorize) -> authorize
-            .mvcMatchers("/my/authorized/endpoint").access(new CustomAuthorizationManager());
+            .requestMatchers("/my/authorized/endpoint").access(new CustomAuthorizationManager());
         )
         // ...
 
@@ -161,7 +162,7 @@ Or you can provide it for all requests as seen below:
 SecurityFilterChain web(HttpSecurity http) throws Exception {
     http
         .authorizeHttpRequests((authorize) -> authorize
-            .anyRequest.access(new CustomAuthorizationManager());
+            .anyRequest().access(new CustomAuthorizationManager());
         )
         // ...
 
@@ -169,3 +170,284 @@ SecurityFilterChain web(HttpSecurity http) throws Exception {
 }
 ----
 ====
+
+By default, the `AuthorizationFilter` applies to all dispatcher types.
+We can configure Spring Security to not apply the authorization rules to all dispatcher types by using the `shouldFilterAllDispatcherTypes` method:
+
+.Set shouldFilterAllDispatcherTypes to false
+====
+.Java
+[source,java,role="primary"]
+----
+@Bean
+SecurityFilterChain web(HttpSecurity http) throws Exception {
+    http
+        .authorizeHttpRequests((authorize) -> authorize
+            .shouldFilterAllDispatcherTypes(false)
+            .anyRequest().authenticated()
+        )
+        // ...
+
+    return http.build();
+}
+----
+.Kotlin
+[source,kotlin,role="secondary"]
+----
+@Bean
+open fun web(http: HttpSecurity): SecurityFilterChain {
+    http {
+        authorizeHttpRequests {
+            shouldFilterAllDispatcherTypes = false
+            authorize(anyRequest, authenticated)
+        }
+    }
+    return http.build()
+}
+----
+====
+
+Instead of setting `shouldFilterAllDispatcherTypes` to `false`, the recommended approach is to customize authorization on the dispatcher types.
+For example, you may want to grant all access on requests with dispatcher type `ASYNC` or `FORWARD`.
+
+.Permit ASYNC and FORWARD dispatcher type
+====
+.Java
+[source,java,role="primary"]
+----
+@Bean
+SecurityFilterChain web(HttpSecurity http) throws Exception {
+    http
+        .authorizeHttpRequests((authorize) -> authorize
+            .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.FORWARD).permitAll()
+            .anyRequest().authenticated()
+        )
+        // ...
+
+    return http.build();
+}
+----
+.Kotlin
+[source,kotlin,role="secondary"]
+----
+@Bean
+open fun web(http: HttpSecurity): SecurityFilterChain {
+    http {
+        authorizeHttpRequests {
+            authorize(DispatcherTypeRequestMatcher(DispatcherType.ASYNC, DispatcherType.FORWARD), permitAll)
+            authorize(anyRequest, authenticated)
+        }
+    }
+    return http.build()
+}
+----
+====
+
+You can also customize it to require a specific role for a dispatcher type:
+
+.Require ADMIN for Dispatcher Type ERROR
+====
+.Java
+[source,java,role="primary"]
+----
+@Bean
+SecurityFilterChain web(HttpSecurity http) throws Exception {
+    http
+        .authorizeHttpRequests((authorize) -> authorize
+            .dispatcherTypeMatchers(DispatcherType.ERROR).hasRole("ADMIN")
+            .anyRequest().authenticated()
+        )
+        // ...
+
+    return http.build();
+}
+----
+.Kotlin
+[source,kotlin,role="secondary"]
+----
+@Bean
+open fun web(http: HttpSecurity): SecurityFilterChain {
+    http {
+        authorizeHttpRequests {
+            authorize(DispatcherTypeRequestMatcher(DispatcherType.ERROR), hasRole("ADMIN"))
+            authorize(anyRequest, authenticated)
+        }
+    }
+    return http.build()
+}
+----
+====
+
+== Request Matchers
+
+The `RequestMatcher` interface is used to determine if a request matches a given rule.
+We use `securityMatchers` to determine if a given `HttpSecurity` should be applied to a given request.
+The same way, we can use `requestMatchers` to determine the authorization rules that we should apply to a given request.
+Look at the following example:
+
+====
+.Java
+[source,java,role="primary"]
+----
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+	@Bean
+	public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+		http
+			.securityMatcher("/api/**")                            <1>
+			.authorizeHttpRequests(authorize -> authorize
+				.requestMatchers("/user/**").hasRole("USER")       <2>
+				.requestMatchers("/admin/**").hasRole("ADMIN")     <3>
+				.anyRequest().authenticated()                      <4>
+			)
+			.formLogin(withDefaults());
+		return http.build();
+	}
+}
+----
+.Kotlin
+[source,kotlin,role="secondary"]
+----
+@Configuration
+@EnableWebSecurity
+open class SecurityConfig {
+
+    @Bean
+    open fun web(http: HttpSecurity): SecurityFilterChain {
+        http {
+            securityMatcher("/api/**")                                           <1>
+            authorizeHttpRequests {
+                authorize("/user/**", hasRole("USER"))                           <2>
+                authorize("/admin/**", hasRole("ADMIN"))                         <3>
+                authorize(anyRequest, authenticated)                             <4>
+            }
+        }
+        return http.build()
+    }
+
+}
+----
+====
+
+<1> Configure `HttpSecurity` to only be applied to URLs that start with `/api/`
+<2> Allow access to URLs that start with `/user/` to users with the `USER` role
+<3> Allow access to URLs that start with `/admin/` to users with the `ADMIN` role
+<4> Any other request that doesn't match the rules above, will require authentication
+
+The `securityMatcher(s)` and `requestMatcher(s)` methods will decide which `RequestMatcher` implementation fits best for your application: If Spring MVC is in the classpath, then `MvcRequestMatcher` will be used, otherwise, `AntPathRequestMatcher` will be used.
+You can read more about the Spring MVC integration xref:servlet/integrations/mvc.adoc[here].
+
+If you want to use a specific `RequestMatcher`, just pass an implementation to the `securityMatcher` and/or `requestMatcher` methods:
+
+====
+.Java
+[source,java,role="primary"]
+----
+import static org.springframework.security.web.util.matcher.AntPathRequestMatcher.antMatcher; <1>
+import static org.springframework.security.web.util.matcher.RegexRequestMatcher.regexMatcher;
+
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+	@Bean
+	public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+		http
+			.securityMatcher(antMatcher("/api/**"))                              <2>
+			.authorizeHttpRequests(authorize -> authorize
+				.requestMatchers(antMatcher("/user/**")).hasRole("USER")         <3>
+				.requestMatchers(regexMatcher("/admin/.*")).hasRole("ADMIN")     <4>
+				.requestMatchers(new MyCustomRequestMatcher()).hasRole("SUPERVISOR")     <5>
+				.anyRequest().authenticated()
+			)
+			.formLogin(withDefaults());
+		return http.build();
+	}
+}
+
+public class MyCustomRequestMatcher implements RequestMatcher {
+
+    @Override
+    public boolean matches(HttpServletRequest request) {
+        // ...
+    }
+}
+----
+.Kotlin
+[source,kotlin,role="secondary"]
+----
+import org.springframework.security.web.util.matcher.AntPathRequestMatcher.antMatcher <1>
+import org.springframework.security.web.util.matcher.RegexRequestMatcher.regexMatcher
+
+@Configuration
+@EnableWebSecurity
+open class SecurityConfig {
+
+    @Bean
+    open fun web(http: HttpSecurity): SecurityFilterChain {
+        http {
+            securityMatcher(antMatcher("/api/**"))                               <2>
+            authorizeHttpRequests {
+                authorize(antMatcher("/user/**"), hasRole("USER"))               <3>
+                authorize(regexMatcher("/admin/**"), hasRole("ADMIN"))           <4>
+                authorize(MyCustomRequestMatcher(), hasRole("SUPERVISOR"))       <5>
+                authorize(anyRequest, authenticated)
+            }
+        }
+        return http.build()
+    }
+
+}
+----
+====
+
+<1> Import the static factory methods from `AntPathRequestMatcher` and `RegexRequestMatcher` to create `RequestMatcher` instances.
+<2> Configure `HttpSecurity` to only be applied to URLs that start with `/api/`, using `AntPathRequestMatcher`
+<3> Allow access to URLs that start with `/user/` to users with the `USER` role, using `AntPathRequestMatcher`
+<4> Allow access to URLs that start with `/admin/` to users with the `ADMIN` role, using `RegexRequestMatcher`
+<5> Allow access to URLs that match the `MyCustomRequestMatcher` to users with the `SUPERVISOR` role, using a custom `RequestMatcher`
+
+== Expressions
+
+It is recommended that you use type-safe authorization managers instead of SpEL.
+However, `WebExpressionAuthorizationManager` is available to help migrate legacy SpEL.
+
+To use `WebExpressionAuthorizationManager`, you can construct one with the expression you are trying to migrate, like so:
+
+====
+.Java
+[source,java,role="primary"]
+----
+.requestMatchers("/test/**").access(new WebExpressionAuthorizationManager("hasRole('ADMIN') && hasRole('USER')"))
+----
+
+.Kotlin
+[source,kotlin,role="secondary"]
+----
+.requestMatchers("/test/**").access(WebExpressionAuthorizationManager("hasRole('ADMIN') && hasRole('USER')"))
+----
+====
+
+If you are referring to a bean in your expression like so: `@webSecurity.check(authentication, request)`, it's recommended that you instead call the bean directly, which will look something like the following:
+
+====
+.Java
+[source,java,role="primary"]
+----
+.requestMatchers("/test/**").access((authentication, context) ->
+    new AuthorizationDecision(webSecurity.check(authentication.get(), context.getRequest())))
+----
+
+.Kotlin
+[source,kotlin,role="secondary"]
+----
+.requestMatchers("/test/**").access((authentication, context): AuthorizationManager<RequestAuthorizationContext> ->
+    AuthorizationDecision(webSecurity.check(authentication.get(), context.getRequest())))
+----
+====
+
+For complex instructions that include bean references as well as other expressions, it is recommended that you change those to implement `AuthorizationManager` and refer to them by calling `.access(AuthorizationManager)`.
+
+If you are not able to do that, you can configure a `DefaultHttpSecurityExpressionHandler` with a bean resolver and supply that to `WebExpressionAuthorizationManager#setExpressionhandler`.

@@ -28,6 +28,7 @@ The following code shows the complete configuration options provided by the `Ser
 .Java
 [source,java,role="primary"]
 ----
+@Configuration
 @EnableWebFluxSecurity
 public class OAuth2ClientSecurityConfig {
 
@@ -38,6 +39,7 @@ public class OAuth2ClientSecurityConfig {
 				.clientRegistrationRepository(this.clientRegistrationRepository())
 				.authorizedClientRepository(this.authorizedClientRepository())
 				.authorizationRequestRepository(this.authorizationRequestRepository())
+				.authorizationRequestResolver(this.authorizationRequestResolver())
 				.authenticationConverter(this.authenticationConverter())
 				.authenticationManager(this.authenticationManager())
 			);
@@ -50,6 +52,7 @@ public class OAuth2ClientSecurityConfig {
 .Kotlin
 [source,kotlin,role="secondary"]
 ----
+@Configuration
 @EnableWebFluxSecurity
 class OAuth2ClientSecurityConfig {
 
@@ -60,6 +63,7 @@ class OAuth2ClientSecurityConfig {
                 clientRegistrationRepository = clientRegistrationRepository()
                 authorizedClientRepository = authorizedClientRepository()
                 authorizationRequestRepository = authorizedRequestRepository()
+                authorizationRequestResolver = authorizationRequestResolver()
                 authenticationConverter = authenticationConverter()
                 authenticationManager = authenticationManager()
             }

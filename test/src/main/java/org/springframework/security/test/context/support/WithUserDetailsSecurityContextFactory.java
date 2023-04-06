@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2018 the original author or authors.
+ * Copyright 2002-2022 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.context.SecurityContextHolderStrategy;
 import org.springframework.security.core.userdetails.ReactiveUserDetailsService;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -42,10 +43,17 @@ import org.springframework.util.StringUtils;
  */
 final class WithUserDetailsSecurityContextFactory implements WithSecurityContextFactory<WithUserDetails> {
 
-	private static final boolean reactorPresent = ClassUtils.isPresent("reactor.core.publisher.Mono",
-			WithUserDetailsSecurityContextFactory.class.getClassLoader());
+	private static final boolean reactorPresent;
+
+	private SecurityContextHolderStrategy securityContextHolderStrategy = SecurityContextHolder
+			.getContextHolderStrategy();
 
 	private BeanFactory beans;
+
+	static {
+		reactorPresent = ClassUtils.isPresent("reactor.core.publisher.Mono",
+				WithUserDetailsSecurityContextFactory.class.getClassLoader());
+	}
 
 	@Autowired
 	WithUserDetailsSecurityContextFactory(BeanFactory beans) {
@@ -59,11 +67,16 @@ final class WithUserDetailsSecurityContextFactory implements WithSecurityContext
 		String username = withUser.value();
 		Assert.hasLength(username, "value() must be non empty String");
 		UserDetails principal = userDetailsService.loadUserByUsername(username);
-		Authentication authentication = new UsernamePasswordAuthenticationToken(principal, principal.getPassword(),
-				principal.getAuthorities());
-		SecurityContext context = SecurityContextHolder.createEmptyContext();
+		Authentication authentication = UsernamePasswordAuthenticationToken.authenticated(principal,
+				principal.getPassword(), principal.getAuthorities());
+		SecurityContext context = this.securityContextHolderStrategy.createEmptyContext();
 		context.setAuthentication(authentication);
 		return context;
+	}
+
+	@Autowired(required = false)
+	void setSecurityContextHolderStrategy(SecurityContextHolderStrategy securityContextHolderStrategy) {
+		this.securityContextHolderStrategy = securityContextHolderStrategy;
 	}
 
 	private UserDetailsService findUserDetailsService(String beanName) {

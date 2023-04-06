@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2019 the original author or authors.
+ * Copyright 2002-2022 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,12 +26,18 @@ import org.junit.jupiter.api.extension.ExtendWith;
 
 import org.springframework.beans.factory.BeanCreationException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
 import org.springframework.security.config.test.SpringTestContext;
 import org.springframework.security.config.test.SpringTestContextExtension;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.header.writers.CrossOriginEmbedderPolicyHeaderWriter;
+import org.springframework.security.web.header.writers.CrossOriginOpenerPolicyHeaderWriter;
+import org.springframework.security.web.header.writers.CrossOriginResourcePolicyHeaderWriter;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy;
+import org.springframework.security.web.header.writers.XXssProtectionHeaderWriter;
 import org.springframework.security.web.header.writers.frameoptions.XFrameOptionsHeaderWriter.XFrameOptionsMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -52,6 +58,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * @author Eddú Meléndez
  * @author Vedran Pavic
  * @author Eleftheria Stein
+ * @author Marcus Da Coregio
+ * @author Daniel Garnier-Moiroux
  */
 @ExtendWith(SpringTestContextExtension.class)
 public class HeadersConfigurerTests {
@@ -72,7 +80,7 @@ public class HeadersConfigurerTests {
 				.andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-cache, no-store, max-age=0, must-revalidate"))
 				.andExpect(header().string(HttpHeaders.EXPIRES, "0"))
 				.andExpect(header().string(HttpHeaders.PRAGMA, "no-cache"))
-				.andExpect(header().string(HttpHeaders.X_XSS_PROTECTION, "1; mode=block")).andReturn();
+				.andExpect(header().string(HttpHeaders.X_XSS_PROTECTION, "0")).andReturn();
 		assertThat(mvcResult.getResponse().getHeaderNames()).containsExactlyInAnyOrder(
 				HttpHeaders.X_CONTENT_TYPE_OPTIONS, HttpHeaders.X_FRAME_OPTIONS, HttpHeaders.STRICT_TRANSPORT_SECURITY,
 				HttpHeaders.CACHE_CONTROL, HttpHeaders.EXPIRES, HttpHeaders.PRAGMA, HttpHeaders.X_XSS_PROTECTION);
@@ -89,7 +97,7 @@ public class HeadersConfigurerTests {
 				.andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-cache, no-store, max-age=0, must-revalidate"))
 				.andExpect(header().string(HttpHeaders.EXPIRES, "0"))
 				.andExpect(header().string(HttpHeaders.PRAGMA, "no-cache"))
-				.andExpect(header().string(HttpHeaders.X_XSS_PROTECTION, "1; mode=block")).andReturn();
+				.andExpect(header().string(HttpHeaders.X_XSS_PROTECTION, "0")).andReturn();
 		assertThat(mvcResult.getResponse().getHeaderNames()).containsExactlyInAnyOrder(
 				HttpHeaders.X_CONTENT_TYPE_OPTIONS, HttpHeaders.X_FRAME_OPTIONS, HttpHeaders.STRICT_TRANSPORT_SECURITY,
 				HttpHeaders.CACHE_CONTROL, HttpHeaders.EXPIRES, HttpHeaders.PRAGMA, HttpHeaders.X_XSS_PROTECTION);
@@ -161,6 +169,15 @@ public class HeadersConfigurerTests {
 			throws Exception {
 		this.spring.register(XssProtectionConfig.class).autowire();
 		MvcResult mvcResult = this.mvc.perform(get("/").secure(true))
+				.andExpect(header().string(HttpHeaders.X_XSS_PROTECTION, "0")).andReturn();
+		assertThat(mvcResult.getResponse().getHeaderNames()).containsExactly(HttpHeaders.X_XSS_PROTECTION);
+	}
+
+	@Test
+	public void getWhenHeaderDefaultsDisabledAndXssProtectionConfiguredEnabledModeBlockThenOnlyXssProtectionHeaderInResponse()
+			throws Exception {
+		this.spring.register(XssProtectionValueEnabledModeBlockConfig.class).autowire();
+		MvcResult mvcResult = this.mvc.perform(get("/").secure(true))
 				.andExpect(header().string(HttpHeaders.X_XSS_PROTECTION, "1; mode=block")).andReturn();
 		assertThat(mvcResult.getResponse().getHeaderNames()).containsExactly(HttpHeaders.X_XSS_PROTECTION);
 	}
@@ -168,6 +185,15 @@ public class HeadersConfigurerTests {
 	@Test
 	public void getWhenOnlyXssProtectionConfiguredInLambdaThenOnlyXssProtectionHeaderInResponse() throws Exception {
 		this.spring.register(XssProtectionInLambdaConfig.class).autowire();
+		MvcResult mvcResult = this.mvc.perform(get("/").secure(true))
+				.andExpect(header().string(HttpHeaders.X_XSS_PROTECTION, "0")).andReturn();
+		assertThat(mvcResult.getResponse().getHeaderNames()).containsExactly(HttpHeaders.X_XSS_PROTECTION);
+	}
+
+	@Test
+	public void getWhenHeaderDefaultsDisabledAndXssProtectionConfiguredValueEnabledModeBlockInLambdaThenOnlyXssProtectionHeaderInResponse()
+			throws Exception {
+		this.spring.register(XssProtectionValueEnabledModeBlockInLambdaConfig.class).autowire();
 		MvcResult mvcResult = this.mvc.perform(get("/").secure(true))
 				.andExpect(header().string(HttpHeaders.X_XSS_PROTECTION, "1; mode=block")).andReturn();
 		assertThat(mvcResult.getResponse().getHeaderNames()).containsExactly(HttpHeaders.X_XSS_PROTECTION);
@@ -514,52 +540,83 @@ public class HeadersConfigurerTests {
 		assertThat(mvcResult.getResponse().getHeaderNames()).containsExactly(HttpHeaders.STRICT_TRANSPORT_SECURITY);
 	}
 
-	@EnableWebSecurity
-	static class HeadersConfig extends WebSecurityConfigurerAdapter {
+	@Test
+	public void getWhenCustomCrossOriginPoliciesInLambdaThenCrossOriginPolicyHeadersWithCustomValuesInResponse()
+			throws Exception {
+		this.spring.register(CrossOriginCustomPoliciesInLambdaConfig.class).autowire();
+		MvcResult mvcResult = this.mvc.perform(get("/"))
+				.andExpect(header().string(HttpHeaders.CROSS_ORIGIN_OPENER_POLICY, "same-origin"))
+				.andExpect(header().string(HttpHeaders.CROSS_ORIGIN_EMBEDDER_POLICY, "require-corp"))
+				.andExpect(header().string(HttpHeaders.CROSS_ORIGIN_RESOURCE_POLICY, "same-origin")).andReturn();
+		assertThat(mvcResult.getResponse().getHeaderNames()).containsExactly(HttpHeaders.CROSS_ORIGIN_OPENER_POLICY,
+				HttpHeaders.CROSS_ORIGIN_EMBEDDER_POLICY, HttpHeaders.CROSS_ORIGIN_RESOURCE_POLICY);
+	}
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+	@Test
+	public void getWhenCustomCrossOriginPoliciesThenCrossOriginPolicyHeadersWithCustomValuesInResponse()
+			throws Exception {
+		this.spring.register(CrossOriginCustomPoliciesConfig.class).autowire();
+		MvcResult mvcResult = this.mvc.perform(get("/"))
+				.andExpect(header().string(HttpHeaders.CROSS_ORIGIN_OPENER_POLICY, "same-origin"))
+				.andExpect(header().string(HttpHeaders.CROSS_ORIGIN_EMBEDDER_POLICY, "require-corp"))
+				.andExpect(header().string(HttpHeaders.CROSS_ORIGIN_RESOURCE_POLICY, "same-origin")).andReturn();
+		assertThat(mvcResult.getResponse().getHeaderNames()).containsExactly(HttpHeaders.CROSS_ORIGIN_OPENER_POLICY,
+				HttpHeaders.CROSS_ORIGIN_EMBEDDER_POLICY, HttpHeaders.CROSS_ORIGIN_RESOURCE_POLICY);
+	}
+
+	@Configuration
+	@EnableWebSecurity
+	static class HeadersConfig {
+
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers();
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class HeadersInLambdaConfig extends WebSecurityConfigurerAdapter {
+	static class HeadersInLambdaConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers(withDefaults());
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class ContentTypeOptionsConfig extends WebSecurityConfigurerAdapter {
+	static class ContentTypeOptionsConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
 					.defaultsDisabled()
 					.contentTypeOptions();
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class ContentTypeOptionsInLambdaConfig extends WebSecurityConfigurerAdapter {
+	static class ContentTypeOptionsInLambdaConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers((headers) ->
@@ -567,61 +624,69 @@ public class HeadersConfigurerTests {
 						.defaultsDisabled()
 						.contentTypeOptions(withDefaults())
 				);
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class FrameOptionsConfig extends WebSecurityConfigurerAdapter {
+	static class FrameOptionsConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
 					.defaultsDisabled()
 					.frameOptions();
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class HstsConfig extends WebSecurityConfigurerAdapter {
+	static class HstsConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
 					.defaultsDisabled()
 					.httpStrictTransportSecurity();
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class CacheControlConfig extends WebSecurityConfigurerAdapter {
+	static class CacheControlConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
 					.defaultsDisabled()
 					.cacheControl();
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class CacheControlInLambdaConfig extends WebSecurityConfigurerAdapter {
+	static class CacheControlInLambdaConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers((headers) ->
@@ -629,31 +694,52 @@ public class HeadersConfigurerTests {
 						.defaultsDisabled()
 						.cacheControl(withDefaults())
 				);
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class XssProtectionConfig extends WebSecurityConfigurerAdapter {
+	static class XssProtectionConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
 					.defaultsDisabled()
 					.xssProtection();
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class XssProtectionInLambdaConfig extends WebSecurityConfigurerAdapter {
+	static class XssProtectionValueEnabledModeBlockConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+			// @formatter:off
+			http
+				.headers()
+					.defaultsDisabled()
+					.xssProtection()
+					.headerValue(XXssProtectionHeaderWriter.HeaderValue.ENABLED_MODE_BLOCK);
+			// @formatter:on
+			return http.build();
+		}
+
+	}
+
+	@EnableWebSecurity
+	static class XssProtectionInLambdaConfig {
+
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers((headers) ->
@@ -661,77 +747,107 @@ public class HeadersConfigurerTests {
 						.defaultsDisabled()
 						.xssProtection(withDefaults())
 				);
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class HeadersCustomSameOriginConfig extends WebSecurityConfigurerAdapter {
+	static class XssProtectionValueEnabledModeBlockInLambdaConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+			// @formatter:off
+			http
+				.headers((headers) ->
+					headers
+						.defaultsDisabled()
+						.xssProtection((xXssConfig) ->
+							xXssConfig.headerValue(XXssProtectionHeaderWriter.HeaderValue.ENABLED_MODE_BLOCK)
+						)
+				);
+			// @formatter:on
+			return http.build();
+		}
+
+	}
+
+	@EnableWebSecurity
+	static class HeadersCustomSameOriginConfig {
+
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
 					.frameOptions().sameOrigin();
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class HeadersCustomSameOriginInLambdaConfig extends WebSecurityConfigurerAdapter {
+	static class HeadersCustomSameOriginInLambdaConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers((headers) ->
 					headers
 						.frameOptions((frameOptionsConfig) -> frameOptionsConfig.sameOrigin())
 				);
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class HpkpConfigNoPins extends WebSecurityConfigurerAdapter {
+	static class HpkpConfigNoPins {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
 					.defaultsDisabled()
 					.httpPublicKeyPinning();
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class HpkpConfig extends WebSecurityConfigurerAdapter {
+	static class HpkpConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
 					.defaultsDisabled()
 					.httpPublicKeyPinning()
 						.addSha256Pins("d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM=");
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class HpkpConfigWithPins extends WebSecurityConfigurerAdapter {
+	static class HpkpConfigWithPins {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			Map<String, String> pins = new LinkedHashMap<>();
 			pins.put("d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM=", "sha256");
 			pins.put("E9CZ9INDbd+2eRQozYqqbQ2yXLVKB9+xcprMF+44U1g=", "sha256");
@@ -741,16 +857,18 @@ public class HeadersConfigurerTests {
 					.defaultsDisabled()
 					.httpPublicKeyPinning()
 						.withPins(pins);
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class HpkpConfigCustomAge extends WebSecurityConfigurerAdapter {
+	static class HpkpConfigCustomAge {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
@@ -758,16 +876,18 @@ public class HeadersConfigurerTests {
 					.httpPublicKeyPinning()
 						.addSha256Pins("d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM=")
 						.maxAgeInSeconds(604800);
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class HpkpConfigTerminateConnection extends WebSecurityConfigurerAdapter {
+	static class HpkpConfigTerminateConnection {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
@@ -775,16 +895,18 @@ public class HeadersConfigurerTests {
 					.httpPublicKeyPinning()
 						.addSha256Pins("d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM=")
 						.reportOnly(false);
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class HpkpConfigIncludeSubDomains extends WebSecurityConfigurerAdapter {
+	static class HpkpConfigIncludeSubDomains {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
@@ -792,16 +914,18 @@ public class HeadersConfigurerTests {
 					.httpPublicKeyPinning()
 						.addSha256Pins("d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM=")
 						.includeSubDomains(true);
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class HpkpConfigWithReportURI extends WebSecurityConfigurerAdapter {
+	static class HpkpConfigWithReportURI {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
@@ -809,16 +933,18 @@ public class HeadersConfigurerTests {
 					.httpPublicKeyPinning()
 						.addSha256Pins("d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM=")
 						.reportUri(new URI("https://example.net/pkp-report"));
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class HpkpConfigWithReportURIAsString extends WebSecurityConfigurerAdapter {
+	static class HpkpConfigWithReportURIAsString {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
@@ -826,16 +952,18 @@ public class HeadersConfigurerTests {
 					.httpPublicKeyPinning()
 						.addSha256Pins("d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM=")
 						.reportUri("https://example.net/pkp-report");
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class HpkpWithReportUriInLambdaConfig extends WebSecurityConfigurerAdapter {
+	static class HpkpWithReportUriInLambdaConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers((headers) ->
@@ -847,47 +975,53 @@ public class HeadersConfigurerTests {
 								.reportUri("https://example.net/pkp-report")
 						)
 				);
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class ContentSecurityPolicyDefaultConfig extends WebSecurityConfigurerAdapter {
+	static class ContentSecurityPolicyDefaultConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
 					.defaultsDisabled()
 					.contentSecurityPolicy("default-src 'self'");
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class ContentSecurityPolicyReportOnlyConfig extends WebSecurityConfigurerAdapter {
+	static class ContentSecurityPolicyReportOnlyConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
 					.defaultsDisabled()
 					.contentSecurityPolicy("default-src 'self'; script-src trustedscripts.example.com")
 					.reportOnly();
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class ContentSecurityPolicyReportOnlyInLambdaConfig extends WebSecurityConfigurerAdapter {
+	static class ContentSecurityPolicyReportOnlyInLambdaConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers((headers) ->
@@ -899,31 +1033,35 @@ public class HeadersConfigurerTests {
 								.reportOnly()
 						)
 				);
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class ContentSecurityPolicyInvalidConfig extends WebSecurityConfigurerAdapter {
+	static class ContentSecurityPolicyInvalidConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
 					.defaultsDisabled()
 					.contentSecurityPolicy("");
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class ContentSecurityPolicyInvalidInLambdaConfig extends WebSecurityConfigurerAdapter {
+	static class ContentSecurityPolicyInvalidInLambdaConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers((headers) ->
@@ -933,16 +1071,18 @@ public class HeadersConfigurerTests {
 								csp.policyDirectives("")
 						)
 				);
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class ContentSecurityPolicyNoDirectivesInLambdaConfig extends WebSecurityConfigurerAdapter {
+	static class ContentSecurityPolicyNoDirectivesInLambdaConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers((headers) ->
@@ -950,31 +1090,35 @@ public class HeadersConfigurerTests {
 						.defaultsDisabled()
 						.contentSecurityPolicy(withDefaults())
 				);
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class ReferrerPolicyDefaultConfig extends WebSecurityConfigurerAdapter {
+	static class ReferrerPolicyDefaultConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
 					.defaultsDisabled()
 					.referrerPolicy();
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class ReferrerPolicyDefaultInLambdaConfig extends WebSecurityConfigurerAdapter {
+	static class ReferrerPolicyDefaultInLambdaConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers((headers) ->
@@ -982,31 +1126,35 @@ public class HeadersConfigurerTests {
 						.defaultsDisabled()
 						.referrerPolicy()
 				);
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class ReferrerPolicyCustomConfig extends WebSecurityConfigurerAdapter {
+	static class ReferrerPolicyCustomConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
 					.defaultsDisabled()
 					.referrerPolicy(ReferrerPolicy.SAME_ORIGIN);
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class ReferrerPolicyCustomInLambdaConfig extends WebSecurityConfigurerAdapter {
+	static class ReferrerPolicyCustomInLambdaConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers((headers) ->
@@ -1016,124 +1164,140 @@ public class HeadersConfigurerTests {
 								referrerPolicy.policy(ReferrerPolicy.SAME_ORIGIN)
 						)
 				);
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class FeaturePolicyConfig extends WebSecurityConfigurerAdapter {
+	static class FeaturePolicyConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
 					.defaultsDisabled()
 					.featurePolicy("geolocation 'self'");
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class FeaturePolicyInvalidConfig extends WebSecurityConfigurerAdapter {
+	static class FeaturePolicyInvalidConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
 					.defaultsDisabled()
 					.featurePolicy("");
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class PermissionsPolicyConfig extends WebSecurityConfigurerAdapter {
+	static class PermissionsPolicyConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
 					.defaultsDisabled()
 					.permissionsPolicy((permissionsPolicy) -> permissionsPolicy.policy("geolocation=(self)"));
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class PermissionsPolicyStringConfig extends WebSecurityConfigurerAdapter {
+	static class PermissionsPolicyStringConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
 					.defaultsDisabled()
 					.permissionsPolicy()
 					.policy("geolocation=(self)");
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class PermissionsPolicyInvalidConfig extends WebSecurityConfigurerAdapter {
+	static class PermissionsPolicyInvalidConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
 					.defaultsDisabled()
 					.permissionsPolicy((permissionsPolicy) -> permissionsPolicy.policy(null));
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class PermissionsPolicyInvalidStringConfig extends WebSecurityConfigurerAdapter {
+	static class PermissionsPolicyInvalidStringConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
 					.defaultsDisabled()
 					.permissionsPolicy()
 					.policy("");
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class HstsWithPreloadConfig extends WebSecurityConfigurerAdapter {
+	static class HstsWithPreloadConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers()
 					.defaultsDisabled()
 					.httpStrictTransportSecurity()
 						.preload(true);
+			return http.build();
 			// @formatter:on
 		}
 
 	}
 
+	@Configuration
 	@EnableWebSecurity
-	static class HstsWithPreloadInLambdaConfig extends WebSecurityConfigurerAdapter {
+	static class HstsWithPreloadInLambdaConfig {
 
-		@Override
-		protected void configure(HttpSecurity http) throws Exception {
+		@Bean
+		SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 			// @formatter:off
 			http
 				.headers((headers) ->
@@ -1141,7 +1305,56 @@ public class HeadersConfigurerTests {
 						.defaultsDisabled()
 						.httpStrictTransportSecurity((hstsConfig) -> hstsConfig.preload(true))
 				);
+			return http.build();
 			// @formatter:on
+		}
+
+	}
+
+	@Configuration
+	@EnableWebSecurity
+	static class CrossOriginCustomPoliciesInLambdaConfig {
+
+		@Bean
+		SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+			// @formatter:off
+			http.headers((headers) -> headers
+					.defaultsDisabled()
+					.crossOriginOpenerPolicy((policy) -> policy
+						.policy(CrossOriginOpenerPolicyHeaderWriter.CrossOriginOpenerPolicy.SAME_ORIGIN)
+					)
+					.crossOriginEmbedderPolicy((policy) -> policy
+						.policy(CrossOriginEmbedderPolicyHeaderWriter.CrossOriginEmbedderPolicy.REQUIRE_CORP)
+					)
+					.crossOriginResourcePolicy((policy) -> policy
+						.policy(CrossOriginResourcePolicyHeaderWriter.CrossOriginResourcePolicy.SAME_ORIGIN)
+					)
+			);
+			// @formatter:on
+			return http.build();
+		}
+
+	}
+
+	@Configuration
+	@EnableWebSecurity
+	static class CrossOriginCustomPoliciesConfig {
+
+		@Bean
+		SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+			// @formatter:off
+			http.headers()
+					.defaultsDisabled()
+					.crossOriginOpenerPolicy()
+						.policy(CrossOriginOpenerPolicyHeaderWriter.CrossOriginOpenerPolicy.SAME_ORIGIN)
+						.and()
+					.crossOriginEmbedderPolicy()
+						.policy(CrossOriginEmbedderPolicyHeaderWriter.CrossOriginEmbedderPolicy.REQUIRE_CORP)
+						.and()
+					.crossOriginResourcePolicy()
+						.policy(CrossOriginResourcePolicyHeaderWriter.CrossOriginResourcePolicy.SAME_ORIGIN);
+			// @formatter:on
+			return http.build();
 		}
 
 	}

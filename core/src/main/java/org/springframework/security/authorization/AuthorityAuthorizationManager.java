@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2021 the original author or authors.
+ * Copyright 2002-2023 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,12 @@
 
 package org.springframework.security.authorization;
 
-import java.util.HashSet;
 import java.util.Set;
 import java.util.function.Supplier;
 
+import org.springframework.security.access.hierarchicalroles.NullRoleHierarchy;
+import org.springframework.security.access.hierarchicalroles.RoleHierarchy;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.util.Assert;
 
 /**
@@ -37,21 +36,36 @@ public final class AuthorityAuthorizationManager<T> implements AuthorizationMana
 
 	private static final String ROLE_PREFIX = "ROLE_";
 
-	private final Set<GrantedAuthority> authorities;
+	private final AuthoritiesAuthorizationManager delegate = new AuthoritiesAuthorizationManager();
+
+	private final Set<String> authorities;
 
 	private AuthorityAuthorizationManager(String... authorities) {
-		this.authorities = new HashSet<>(AuthorityUtils.createAuthorityList(authorities));
+		this.authorities = Set.of(authorities);
+	}
+
+	/**
+	 * Sets the {@link RoleHierarchy} to be used. Default is {@link NullRoleHierarchy}.
+	 * Cannot be null.
+	 * @param roleHierarchy the {@link RoleHierarchy} to use
+	 * @since 5.8
+	 */
+	public void setRoleHierarchy(RoleHierarchy roleHierarchy) {
+		this.delegate.setRoleHierarchy(roleHierarchy);
 	}
 
 	/**
 	 * Creates an instance of {@link AuthorityAuthorizationManager} with the provided
 	 * authority.
-	 * @param role the authority to check for prefixed with "ROLE_"
+	 * @param role the authority to check for prefixed with "ROLE_". Role should not start
+	 * with "ROLE_" since it is automatically prepended already.
 	 * @param <T> the type of object being authorized
 	 * @return the new instance
 	 */
 	public static <T> AuthorityAuthorizationManager<T> hasRole(String role) {
 		Assert.notNull(role, "role cannot be null");
+		Assert.isTrue(!role.startsWith(ROLE_PREFIX), () -> role + " should not start with " + ROLE_PREFIX + " since "
+				+ ROLE_PREFIX + " is automatically prepended when using hasRole. Consider using hasAuthority instead.");
 		return hasAuthority(ROLE_PREFIX + role);
 	}
 
@@ -70,7 +84,8 @@ public final class AuthorityAuthorizationManager<T> implements AuthorizationMana
 	/**
 	 * Creates an instance of {@link AuthorityAuthorizationManager} with the provided
 	 * authorities.
-	 * @param roles the authorities to check for prefixed with "ROLE_"
+	 * @param roles the authorities to check for prefixed with "ROLE_". Each role should
+	 * not start with "ROLE_" since it is automatically prepended already.
 	 * @param <T> the type of object being authorized
 	 * @return the new instance
 	 */
@@ -109,7 +124,11 @@ public final class AuthorityAuthorizationManager<T> implements AuthorizationMana
 	private static String[] toNamedRolesArray(String rolePrefix, String[] roles) {
 		String[] result = new String[roles.length];
 		for (int i = 0; i < roles.length; i++) {
-			result[i] = rolePrefix + roles[i];
+			String role = roles[i];
+			Assert.isTrue(!role.startsWith(rolePrefix), () -> role + " should not start with " + rolePrefix + " since "
+					+ rolePrefix
+					+ " is automatically prepended when using hasAnyRole. Consider using hasAnyAuthority instead.");
+			result[i] = rolePrefix + role;
 		}
 		return result;
 	}
@@ -123,21 +142,7 @@ public final class AuthorityAuthorizationManager<T> implements AuthorizationMana
 	 */
 	@Override
 	public AuthorizationDecision check(Supplier<Authentication> authentication, T object) {
-		boolean granted = isGranted(authentication.get());
-		return new AuthorityAuthorizationDecision(granted, this.authorities);
-	}
-
-	private boolean isGranted(Authentication authentication) {
-		return authentication != null && authentication.isAuthenticated() && isAuthorized(authentication);
-	}
-
-	private boolean isAuthorized(Authentication authentication) {
-		for (GrantedAuthority grantedAuthority : authentication.getAuthorities()) {
-			if (this.authorities.contains(grantedAuthority)) {
-				return true;
-			}
-		}
-		return false;
+		return this.delegate.check(authentication, this.authorities);
 	}
 
 	@Override

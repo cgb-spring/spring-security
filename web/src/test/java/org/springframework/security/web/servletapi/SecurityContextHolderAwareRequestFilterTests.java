@@ -1,5 +1,5 @@
 /*
- * Copyright 2004, 2005, 2006 Acegi Technology Pty Limited
+ * Copyright 2004, 2005, 2006, 2021 Acegi Technology Pty Limited
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,6 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +35,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.TestingAuthenticationToken;
@@ -45,12 +45,14 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.security.web.authentication.WebAuthenticationDetails;
 import org.springframework.security.web.authentication.logout.LogoutHandler;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -58,7 +60,7 @@ import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyZeroInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 /**
  * Tests {@link SecurityContextHolderAwareRequestFilter}.
@@ -126,7 +128,7 @@ public class SecurityContextHolderAwareRequestFilterTests {
 		assertThat(wrappedRequest().authenticate(this.response)).isFalse();
 		verify(this.authenticationEntryPoint).commence(eq(this.requestCaptor.getValue()), eq(this.response),
 				any(AuthenticationException.class));
-		verifyZeroInteractions(this.authenticationManager, this.logoutHandler);
+		verifyNoMoreInteractions(this.authenticationManager, this.logoutHandler);
 		verify(this.request, times(0)).authenticate(any(HttpServletResponse.class));
 	}
 
@@ -135,7 +137,7 @@ public class SecurityContextHolderAwareRequestFilterTests {
 		SecurityContextHolder.getContext()
 				.setAuthentication(new TestingAuthenticationToken("test", "password", "ROLE_USER"));
 		assertThat(wrappedRequest().authenticate(this.response)).isTrue();
-		verifyZeroInteractions(this.authenticationEntryPoint, this.authenticationManager, this.logoutHandler);
+		verifyNoMoreInteractions(this.authenticationEntryPoint, this.authenticationManager, this.logoutHandler);
 		verify(this.request, times(0)).authenticate(any(HttpServletResponse.class));
 	}
 
@@ -145,7 +147,7 @@ public class SecurityContextHolderAwareRequestFilterTests {
 		this.filter.afterPropertiesSet();
 		assertThat(wrappedRequest().authenticate(this.response)).isFalse();
 		verify(this.request).authenticate(this.response);
-		verifyZeroInteractions(this.authenticationEntryPoint, this.authenticationManager, this.logoutHandler);
+		verifyNoMoreInteractions(this.authenticationEntryPoint, this.authenticationManager, this.logoutHandler);
 	}
 
 	@Test
@@ -155,7 +157,7 @@ public class SecurityContextHolderAwareRequestFilterTests {
 		this.filter.afterPropertiesSet();
 		assertThat(wrappedRequest().authenticate(this.response)).isTrue();
 		verify(this.request).authenticate(this.response);
-		verifyZeroInteractions(this.authenticationEntryPoint, this.authenticationManager, this.logoutHandler);
+		verifyNoMoreInteractions(this.authenticationEntryPoint, this.authenticationManager, this.logoutHandler);
 	}
 
 	@Test
@@ -165,7 +167,7 @@ public class SecurityContextHolderAwareRequestFilterTests {
 				.willReturn(expectedAuth);
 		wrappedRequest().login(expectedAuth.getName(), String.valueOf(expectedAuth.getCredentials()));
 		assertThat(SecurityContextHolder.getContext().getAuthentication()).isSameAs(expectedAuth);
-		verifyZeroInteractions(this.authenticationEntryPoint, this.logoutHandler);
+		verifyNoMoreInteractions(this.authenticationEntryPoint, this.logoutHandler);
 		verify(this.request, times(0)).login(anyString(), anyString());
 	}
 
@@ -177,7 +179,7 @@ public class SecurityContextHolderAwareRequestFilterTests {
 		assertThatExceptionOfType(ServletException.class).isThrownBy(
 				() -> wrappedRequest().login(expectedAuth.getName(), String.valueOf(expectedAuth.getCredentials())));
 		assertThat(SecurityContextHolder.getContext().getAuthentication()).isSameAs(expectedAuth);
-		verifyZeroInteractions(this.authenticationEntryPoint, this.logoutHandler);
+		verifyNoMoreInteractions(this.authenticationEntryPoint, this.logoutHandler);
 		verify(this.request, times(0)).login(anyString(), anyString());
 	}
 
@@ -189,7 +191,7 @@ public class SecurityContextHolderAwareRequestFilterTests {
 		assertThatExceptionOfType(ServletException.class)
 				.isThrownBy(() -> wrappedRequest().login("invalid", "credentials")).withCause(authException);
 		assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
-		verifyZeroInteractions(this.authenticationEntryPoint, this.logoutHandler);
+		verifyNoMoreInteractions(this.authenticationEntryPoint, this.logoutHandler);
 		verify(this.request, times(0)).login(anyString(), anyString());
 	}
 
@@ -201,7 +203,7 @@ public class SecurityContextHolderAwareRequestFilterTests {
 		String password = "password";
 		wrappedRequest().login(username, password);
 		verify(this.request).login(username, password);
-		verifyZeroInteractions(this.authenticationEntryPoint, this.authenticationManager, this.logoutHandler);
+		verifyNoMoreInteractions(this.authenticationEntryPoint, this.authenticationManager, this.logoutHandler);
 	}
 
 	@Test
@@ -214,7 +216,28 @@ public class SecurityContextHolderAwareRequestFilterTests {
 		willThrow(authException).given(this.request).login(username, password);
 		assertThatExceptionOfType(ServletException.class).isThrownBy(() -> wrappedRequest().login(username, password))
 				.isEqualTo(authException);
-		verifyZeroInteractions(this.authenticationEntryPoint, this.authenticationManager, this.logoutHandler);
+		verifyNoMoreInteractions(this.authenticationEntryPoint, this.authenticationManager, this.logoutHandler);
+	}
+
+	@Test
+	public void loginWhenHttpServletRequestHasAuthenticationDetailsThenAuthenticationRequestHasDetails()
+			throws Exception {
+		String ipAddress = "10.0.0.100";
+		String sessionId = "session-id";
+		given(this.request.getRemoteAddr()).willReturn(ipAddress);
+		given(this.request.getSession(anyBoolean())).willReturn(new MockHttpSession(null, sessionId));
+		wrappedRequest().login("username", "password");
+
+		ArgumentCaptor<UsernamePasswordAuthenticationToken> authenticationCaptor = ArgumentCaptor
+				.forClass(UsernamePasswordAuthenticationToken.class);
+		verify(this.authenticationManager).authenticate(authenticationCaptor.capture());
+
+		UsernamePasswordAuthenticationToken authenticationRequest = authenticationCaptor.getValue();
+		assertThat(authenticationRequest.getDetails()).isInstanceOf(WebAuthenticationDetails.class);
+
+		WebAuthenticationDetails details = (WebAuthenticationDetails) authenticationRequest.getDetails();
+		assertThat(details.getRemoteAddress()).isEqualTo(ipAddress);
+		assertThat(details.getSessionId()).isEqualTo(sessionId);
 	}
 
 	@Test
@@ -224,7 +247,7 @@ public class SecurityContextHolderAwareRequestFilterTests {
 		HttpServletRequest wrappedRequest = wrappedRequest();
 		wrappedRequest.logout();
 		verify(this.logoutHandler).logout(wrappedRequest, this.response, expectedAuth);
-		verifyZeroInteractions(this.authenticationManager, this.logoutHandler);
+		verifyNoMoreInteractions(this.authenticationManager, this.logoutHandler);
 		verify(this.request, times(0)).logout();
 	}
 
@@ -234,7 +257,7 @@ public class SecurityContextHolderAwareRequestFilterTests {
 		this.filter.afterPropertiesSet();
 		wrappedRequest().logout();
 		verify(this.request).logout();
-		verifyZeroInteractions(this.authenticationEntryPoint, this.authenticationManager, this.logoutHandler);
+		verifyNoMoreInteractions(this.authenticationEntryPoint, this.authenticationManager, this.logoutHandler);
 	}
 
 	// gh-3780
@@ -255,7 +278,7 @@ public class SecurityContextHolderAwareRequestFilterTests {
 		Runnable runnable = () -> {
 		};
 		wrappedRequest().getAsyncContext().start(runnable);
-		verifyZeroInteractions(this.authenticationManager, this.logoutHandler);
+		verifyNoMoreInteractions(this.authenticationManager, this.logoutHandler);
 		verify(asyncContext).start(runnableCaptor.capture());
 		DelegatingSecurityContextRunnable wrappedRunnable = (DelegatingSecurityContextRunnable) runnableCaptor
 				.getValue();
@@ -275,7 +298,7 @@ public class SecurityContextHolderAwareRequestFilterTests {
 		Runnable runnable = () -> {
 		};
 		wrappedRequest().startAsync().start(runnable);
-		verifyZeroInteractions(this.authenticationManager, this.logoutHandler);
+		verifyNoMoreInteractions(this.authenticationManager, this.logoutHandler);
 		verify(asyncContext).start(runnableCaptor.capture());
 		DelegatingSecurityContextRunnable wrappedRunnable = (DelegatingSecurityContextRunnable) runnableCaptor
 				.getValue();
@@ -295,7 +318,7 @@ public class SecurityContextHolderAwareRequestFilterTests {
 		Runnable runnable = () -> {
 		};
 		wrappedRequest().startAsync(this.request, this.response).start(runnable);
-		verifyZeroInteractions(this.authenticationManager, this.logoutHandler);
+		verifyNoMoreInteractions(this.authenticationManager, this.logoutHandler);
 		verify(asyncContext).start(runnableCaptor.capture());
 		DelegatingSecurityContextRunnable wrappedRunnable = (DelegatingSecurityContextRunnable) runnableCaptor
 				.getValue();

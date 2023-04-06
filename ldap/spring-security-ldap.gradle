@@ -8,6 +8,7 @@ dependencies {
 	api 'org.springframework:spring-core'
 	api 'org.springframework:spring-tx'
 
+	optional 'com.fasterxml.jackson.core:jackson-databind'
 	optional 'ldapsdk:ldapsdk'
 	optional "com.unboundid:unboundid-ldapsdk"
 	optional "org.apache.directory.server:apacheds-core"
@@ -25,7 +26,6 @@ dependencies {
 	}
 
 	testImplementation project(':spring-security-test')
-	testImplementation 'org.slf4j:jcl-over-slf4j'
 	testImplementation 'org.slf4j:slf4j-api'
 	testImplementation "org.assertj:assertj-core"
 	testImplementation "org.junit.jupiter:junit-jupiter-api"
@@ -34,6 +34,7 @@ dependencies {
 	testImplementation "org.mockito:mockito-core"
 	testImplementation "org.mockito:mockito-junit-jupiter"
 	testImplementation "org.springframework:spring-test"
+	testImplementation 'org.skyscreamer:jsonassert'
 }
 
 integrationTest {

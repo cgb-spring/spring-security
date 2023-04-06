@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2020 the original author or authors.
+ * Copyright 2002-2022 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,8 @@
  */
 
 package org.springframework.security.saml2.provider.service.metadata;
+
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
@@ -36,9 +38,8 @@ public class OpenSamlMetadataResolverTests {
 				.assertionConsumerServiceBinding(Saml2MessageBinding.REDIRECT).build();
 		OpenSamlMetadataResolver openSamlMetadataResolver = new OpenSamlMetadataResolver();
 		String metadata = openSamlMetadataResolver.resolve(relyingPartyRegistration);
-		assertThat(metadata).contains("<EntityDescriptor").contains("entityID=\"rp-entity-id\"")
-				.contains("WantAssertionsSigned=\"true\"").contains("<md:KeyDescriptor use=\"signing\">")
-				.contains("<md:KeyDescriptor use=\"encryption\">")
+		assertThat(metadata).contains("<md:EntityDescriptor").contains("entityID=\"rp-entity-id\"")
+				.contains("<md:KeyDescriptor use=\"signing\">").contains("<md:KeyDescriptor use=\"encryption\">")
 				.contains("<ds:X509Certificate>MIICgTCCAeoCCQCuVzyqFgMSyDANBgkqhkiG9w0BAQsFADCBhDELMAkGA1UEBh")
 				.contains("Binding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect\"")
 				.contains("Location=\"https://rp.example.org/acs\" index=\"1\"")
@@ -53,10 +54,56 @@ public class OpenSamlMetadataResolverTests {
 				.build();
 		OpenSamlMetadataResolver openSamlMetadataResolver = new OpenSamlMetadataResolver();
 		String metadata = openSamlMetadataResolver.resolve(relyingPartyRegistration);
-		assertThat(metadata).contains("<EntityDescriptor").contains("entityID=\"rp-entity-id\"")
-				.contains("WantAssertionsSigned=\"true\"").doesNotContain("<md:KeyDescriptor use=\"signing\">")
+		assertThat(metadata).contains("<md:EntityDescriptor").contains("entityID=\"rp-entity-id\"")
+				.doesNotContain("<md:KeyDescriptor use=\"signing\">")
 				.doesNotContain("<md:KeyDescriptor use=\"encryption\">")
 				.contains("Binding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST\"")
+				.contains("Location=\"https://rp.example.org/acs\" index=\"1\"")
+				.contains("ResponseLocation=\"https://rp.example.org/logout/saml2/response\"");
+	}
+
+	@Test
+	public void resolveWhenRelyingPartyNameIDFormatThenMetadataMatches() {
+		RelyingPartyRegistration relyingPartyRegistration = TestRelyingPartyRegistrations.full().nameIdFormat("format")
+				.build();
+		OpenSamlMetadataResolver openSamlMetadataResolver = new OpenSamlMetadataResolver();
+		String metadata = openSamlMetadataResolver.resolve(relyingPartyRegistration);
+		assertThat(metadata).contains("<md:NameIDFormat>format</md:NameIDFormat>");
+	}
+
+	@Test
+	public void resolveWhenRelyingPartyNoLogoutThenMetadataMatches() {
+		RelyingPartyRegistration relyingPartyRegistration = TestRelyingPartyRegistrations.full()
+				.singleLogoutServiceLocation(null).nameIdFormat("format").build();
+		OpenSamlMetadataResolver openSamlMetadataResolver = new OpenSamlMetadataResolver();
+		String metadata = openSamlMetadataResolver.resolve(relyingPartyRegistration);
+		assertThat(metadata).doesNotContain("ResponseLocation");
+	}
+
+	@Test
+	public void resolveWhenEntityDescriptorCustomizerThenUses() {
+		RelyingPartyRegistration relyingPartyRegistration = TestRelyingPartyRegistrations.full()
+				.entityId("originalEntityId").build();
+		OpenSamlMetadataResolver openSamlMetadataResolver = new OpenSamlMetadataResolver();
+		openSamlMetadataResolver.setEntityDescriptorCustomizer(
+				(parameters) -> parameters.getEntityDescriptor().setEntityID("overriddenEntityId"));
+		String metadata = openSamlMetadataResolver.resolve(relyingPartyRegistration);
+		assertThat(metadata).contains("<md:EntityDescriptor").contains("entityID=\"overriddenEntityId\"");
+	}
+
+	@Test
+	public void resolveIterableWhenRelyingPartiesThenMetadataMatches() {
+		RelyingPartyRegistration one = TestRelyingPartyRegistrations.full()
+				.assertionConsumerServiceBinding(Saml2MessageBinding.REDIRECT).build();
+		RelyingPartyRegistration two = TestRelyingPartyRegistrations.full().entityId("two")
+				.assertionConsumerServiceBinding(Saml2MessageBinding.REDIRECT).build();
+		OpenSamlMetadataResolver openSamlMetadataResolver = new OpenSamlMetadataResolver();
+		String metadata = openSamlMetadataResolver.resolve(List.of(one, two));
+		assertThat(metadata).contains("<md:EntitiesDescriptor").contains("<md:EntityDescriptor")
+				.contains("entityID=\"rp-entity-id\"").contains("entityID=\"two\"")
+				.contains("<md:KeyDescriptor use=\"signing\">").contains("<md:KeyDescriptor use=\"encryption\">")
+				.contains("<ds:X509Certificate>MIICgTCCAeoCCQCuVzyqFgMSyDANBgkqhkiG9w0BAQsFADCBhDELMAkGA1UEBh")
+				.contains("Binding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect\"")
 				.contains("Location=\"https://rp.example.org/acs\" index=\"1\"")
 				.contains("ResponseLocation=\"https://rp.example.org/logout/saml2/response\"");
 	}

@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2019 the original author or authors.
+ * Copyright 2002-2022 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,6 +30,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.security.test.web.reactive.server.WebTestClientBuilder;
 import org.springframework.security.web.server.header.ContentSecurityPolicyServerHttpHeadersWriter;
 import org.springframework.security.web.server.header.ContentTypeOptionsServerHttpHeadersWriter;
+import org.springframework.security.web.server.header.CrossOriginEmbedderPolicyServerHttpHeadersWriter;
+import org.springframework.security.web.server.header.CrossOriginOpenerPolicyServerHttpHeadersWriter;
+import org.springframework.security.web.server.header.CrossOriginResourcePolicyServerHttpHeadersWriter;
 import org.springframework.security.web.server.header.FeaturePolicyServerHttpHeadersWriter;
 import org.springframework.security.web.server.header.ReferrerPolicyServerHttpHeadersWriter;
 import org.springframework.security.web.server.header.ReferrerPolicyServerHttpHeadersWriter.ReferrerPolicy;
@@ -48,6 +51,7 @@ import static org.springframework.security.config.Customizer.withDefaults;
  * @author Rob Winch
  * @author Vedran Pavic
  * @author Ankur Pathak
+ * @author Marcus Da Coregio
  * @since 5.0
  */
 public class HeaderSpecTests {
@@ -71,7 +75,7 @@ public class HeaderSpecTests {
 		this.expectedHeaders.add(HttpHeaders.EXPIRES, "0");
 		this.expectedHeaders.add(ContentTypeOptionsServerHttpHeadersWriter.X_CONTENT_OPTIONS, "nosniff");
 		this.expectedHeaders.add(XFrameOptionsServerHttpHeadersWriter.X_FRAME_OPTIONS, "DENY");
-		this.expectedHeaders.add(XXssProtectionServerHttpHeadersWriter.X_XSS_PROTECTION, "1 ; mode=block");
+		this.expectedHeaders.add(XXssProtectionServerHttpHeadersWriter.X_XSS_PROTECTION, "0");
 	}
 
 	@Test
@@ -293,6 +297,51 @@ public class HeaderSpecTests {
 	}
 
 	@Test
+	public void headersWhenXssProtectionValueDisabledThenXssProtectionWritten() {
+		this.expectedHeaders.set(XXssProtectionServerHttpHeadersWriter.X_XSS_PROTECTION, "0");
+		// @formatter:off
+		this.http.headers()
+				.xssProtection()
+				.headerValue(XXssProtectionServerHttpHeadersWriter.HeaderValue.DISABLED);
+		// @formatter:on
+		assertHeaders();
+	}
+
+	@Test
+	public void headersWhenXssProtectionValueEnabledThenXssProtectionWritten() {
+		this.expectedHeaders.set(XXssProtectionServerHttpHeadersWriter.X_XSS_PROTECTION, "1");
+		// @formatter:off
+		this.http.headers()
+				.xssProtection()
+				.headerValue(XXssProtectionServerHttpHeadersWriter.HeaderValue.ENABLED);
+		// @formatter:on
+		assertHeaders();
+	}
+
+	@Test
+	public void headersWhenXssProtectionValueEnabledModeBlockThenXssProtectionWritten() {
+		this.expectedHeaders.set(XXssProtectionServerHttpHeadersWriter.X_XSS_PROTECTION, "1 ; mode=block");
+		// @formatter:off
+		this.http.headers()
+				.xssProtection()
+				.headerValue(XXssProtectionServerHttpHeadersWriter.HeaderValue.ENABLED_MODE_BLOCK);
+		// @formatter:on
+		assertHeaders();
+	}
+
+	@Test
+	public void headersWhenXssProtectionValueDisabledInLambdaThenXssProtectionWritten() {
+		this.expectedHeaders.set(XXssProtectionServerHttpHeadersWriter.X_XSS_PROTECTION, "0");
+		// @formatter:off
+		this.http.headers()
+				.xssProtection((xssProtection) ->
+						xssProtection.headerValue(XXssProtectionServerHttpHeadersWriter.HeaderValue.DISABLED)
+				);
+		// @formatter:on
+		assertHeaders();
+	}
+
+	@Test
 	public void headersWhenFeaturePolicyEnabledThenFeaturePolicyWritten() {
 		String policyDirectives = "Feature-Policy";
 		this.expectedHeaders.add(FeaturePolicyServerHttpHeadersWriter.FEATURE_POLICY, policyDirectives);
@@ -402,6 +451,53 @@ public class HeaderSpecTests {
 					.then()
 				)
 		);
+		// @formatter:on
+		assertHeaders();
+	}
+
+	@Test
+	public void headersWhenCrossOriginPoliciesCustomEnabledThenCustomCrossOriginPoliciesWritten() {
+		this.expectedHeaders.add(CrossOriginOpenerPolicyServerHttpHeadersWriter.OPENER_POLICY,
+				CrossOriginOpenerPolicyServerHttpHeadersWriter.CrossOriginOpenerPolicy.SAME_ORIGIN_ALLOW_POPUPS
+						.getPolicy());
+		this.expectedHeaders.add(CrossOriginEmbedderPolicyServerHttpHeadersWriter.EMBEDDER_POLICY,
+				CrossOriginEmbedderPolicyServerHttpHeadersWriter.CrossOriginEmbedderPolicy.REQUIRE_CORP.getPolicy());
+		this.expectedHeaders.add(CrossOriginResourcePolicyServerHttpHeadersWriter.RESOURCE_POLICY,
+				CrossOriginResourcePolicyServerHttpHeadersWriter.CrossOriginResourcePolicy.SAME_ORIGIN.getPolicy());
+		// @formatter:off
+		this.http.headers()
+				.crossOriginOpenerPolicy()
+						.policy(CrossOriginOpenerPolicyServerHttpHeadersWriter.CrossOriginOpenerPolicy.SAME_ORIGIN_ALLOW_POPUPS)
+						.and()
+				.crossOriginEmbedderPolicy()
+						.policy(CrossOriginEmbedderPolicyServerHttpHeadersWriter.CrossOriginEmbedderPolicy.REQUIRE_CORP)
+						.and()
+				.crossOriginResourcePolicy()
+						.policy(CrossOriginResourcePolicyServerHttpHeadersWriter.CrossOriginResourcePolicy.SAME_ORIGIN);
+		// @formatter:on
+		assertHeaders();
+	}
+
+	@Test
+	public void headersWhenCrossOriginPoliciesCustomEnabledInLambdaThenCustomCrossOriginPoliciesWritten() {
+		this.expectedHeaders.add(CrossOriginOpenerPolicyServerHttpHeadersWriter.OPENER_POLICY,
+				CrossOriginOpenerPolicyServerHttpHeadersWriter.CrossOriginOpenerPolicy.SAME_ORIGIN_ALLOW_POPUPS
+						.getPolicy());
+		this.expectedHeaders.add(CrossOriginEmbedderPolicyServerHttpHeadersWriter.EMBEDDER_POLICY,
+				CrossOriginEmbedderPolicyServerHttpHeadersWriter.CrossOriginEmbedderPolicy.REQUIRE_CORP.getPolicy());
+		this.expectedHeaders.add(CrossOriginResourcePolicyServerHttpHeadersWriter.RESOURCE_POLICY,
+				CrossOriginResourcePolicyServerHttpHeadersWriter.CrossOriginResourcePolicy.SAME_ORIGIN.getPolicy());
+		// @formatter:off
+		this.http.headers()
+				.crossOriginOpenerPolicy((policy) -> policy
+						.policy(CrossOriginOpenerPolicyServerHttpHeadersWriter.CrossOriginOpenerPolicy.SAME_ORIGIN_ALLOW_POPUPS)
+				)
+				.crossOriginEmbedderPolicy((policy) -> policy
+						.policy(CrossOriginEmbedderPolicyServerHttpHeadersWriter.CrossOriginEmbedderPolicy.REQUIRE_CORP)
+				)
+				.crossOriginResourcePolicy((policy) -> policy
+						.policy(CrossOriginResourcePolicyServerHttpHeadersWriter.CrossOriginResourcePolicy.SAME_ORIGIN)
+				);
 		// @formatter:on
 		assertHeaders();
 	}

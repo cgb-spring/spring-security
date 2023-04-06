@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2020 the original author or authors.
+ * Copyright 2002-2023 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -62,13 +62,13 @@ public class OpenSamlRelyingPartyRegistrationBuilderHttpMessageConverter
 		OpenSamlInitializationService.initialize();
 	}
 
-	private final OpenSamlAssertingPartyMetadataConverter converter;
+	private final OpenSamlMetadataRelyingPartyRegistrationConverter converter;
 
 	/**
 	 * Creates a {@link OpenSamlRelyingPartyRegistrationBuilderHttpMessageConverter}
 	 */
 	public OpenSamlRelyingPartyRegistrationBuilderHttpMessageConverter() {
-		this.converter = new OpenSamlAssertingPartyMetadataConverter();
+		this.converter = new OpenSamlMetadataRelyingPartyRegistrationConverter();
 	}
 
 	@Override
@@ -89,7 +89,7 @@ public class OpenSamlRelyingPartyRegistrationBuilderHttpMessageConverter
 	@Override
 	public RelyingPartyRegistration.Builder read(Class<? extends RelyingPartyRegistration.Builder> clazz,
 			HttpInputMessage inputMessage) throws IOException, HttpMessageNotReadableException {
-		return this.converter.convert(inputMessage.getBody());
+		return this.converter.convert(inputMessage.getBody()).iterator().next();
 	}
 
 	@Override

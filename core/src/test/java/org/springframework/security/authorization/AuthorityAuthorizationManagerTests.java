@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2021 the original author or authors.
+ * Copyright 2002-2023 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,12 +16,17 @@
 
 package org.springframework.security.authorization;
 
+import java.util.Collections;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
 
+import org.springframework.security.access.hierarchicalroles.NullRoleHierarchy;
+import org.springframework.security.access.hierarchicalroles.RoleHierarchy;
+import org.springframework.security.access.hierarchicalroles.RoleHierarchyImpl;
 import org.springframework.security.authentication.TestingAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
@@ -37,6 +42,15 @@ public class AuthorityAuthorizationManagerTests {
 	public void hasRoleWhenNullThenException() {
 		assertThatIllegalArgumentException().isThrownBy(() -> AuthorityAuthorizationManager.hasRole(null))
 				.withMessage("role cannot be null");
+	}
+
+	@Test
+	public void hasRoleWhenContainRoleWithRolePrefixThenException() {
+		String ROLE_PREFIX = "ROLE_";
+		String ROLE_USER = ROLE_PREFIX + "USER";
+		assertThatIllegalArgumentException().isThrownBy(() -> AuthorityAuthorizationManager.hasRole(ROLE_USER))
+				.withMessage(ROLE_USER + " should not start with " + ROLE_PREFIX + " since " + ROLE_PREFIX
+						+ " is automatically prepended when using hasRole. Consider using hasAuthority instead.");
 	}
 
 	@Test
@@ -69,6 +83,16 @@ public class AuthorityAuthorizationManagerTests {
 		assertThatIllegalArgumentException()
 				.isThrownBy(() -> AuthorityAuthorizationManager.hasAnyRole(null, new String[] { "ADMIN", "USER" }))
 				.withMessage("rolePrefix cannot be null");
+	}
+
+	@Test
+	public void hasAnyRoleWhenContainRoleWithRolePrefixThenException() {
+		String ROLE_PREFIX = "ROLE_";
+		String ROLE_USER = ROLE_PREFIX + "USER";
+		assertThatIllegalArgumentException()
+				.isThrownBy(() -> AuthorityAuthorizationManager.hasAnyRole(new String[] { ROLE_USER }))
+				.withMessage(ROLE_USER + " should not start with " + ROLE_PREFIX + " since " + ROLE_PREFIX
+						+ " is automatically prepended when using hasAnyRole. Consider using hasAnyAuthority instead.");
 	}
 
 	@Test
@@ -134,6 +158,30 @@ public class AuthorityAuthorizationManagerTests {
 	}
 
 	@Test
+	public void hasAuthorityWhenUserHasCustomAuthorityThenGrantedDecision() {
+		AuthorityAuthorizationManager<Object> manager = AuthorityAuthorizationManager.hasAuthority("ADMIN");
+		GrantedAuthority customGrantedAuthority = () -> "ADMIN";
+
+		Supplier<Authentication> authentication = () -> new TestingAuthenticationToken("user", "password",
+				Collections.singletonList(customGrantedAuthority));
+		Object object = new Object();
+
+		assertThat(manager.check(authentication, object).isGranted()).isTrue();
+	}
+
+	@Test
+	public void hasAuthorityWhenUserHasNotCustomAuthorityThenDeniedDecision() {
+		AuthorityAuthorizationManager<Object> manager = AuthorityAuthorizationManager.hasAuthority("ADMIN");
+		GrantedAuthority customGrantedAuthority = () -> "USER";
+
+		Supplier<Authentication> authentication = () -> new TestingAuthenticationToken("user", "password",
+				Collections.singletonList(customGrantedAuthority));
+		Object object = new Object();
+
+		assertThat(manager.check(authentication, object).isGranted()).isFalse();
+	}
+
+	@Test
 	public void hasAnyRoleWhenUserHasAnyRoleThenGrantedDecision() {
 		AuthorityAuthorizationManager<Object> manager = AuthorityAuthorizationManager.hasAnyRole("ADMIN", "USER");
 
@@ -183,6 +231,39 @@ public class AuthorityAuthorizationManagerTests {
 		Object object = new Object();
 
 		assertThat(manager.check(authentication, object).isGranted()).isFalse();
+	}
+
+	@Test
+	public void setRoleHierarchyWhenNullThenIllegalArgumentException() {
+		AuthorityAuthorizationManager<Object> manager = AuthorityAuthorizationManager.hasRole("USER");
+		assertThatIllegalArgumentException().isThrownBy(() -> manager.setRoleHierarchy(null))
+				.withMessage("roleHierarchy cannot be null");
+	}
+
+	@Test
+	public void setRoleHierarchyWhenNotNullThenVerifyRoleHierarchy() {
+		AuthorityAuthorizationManager<Object> manager = AuthorityAuthorizationManager.hasRole("USER");
+		RoleHierarchy roleHierarchy = new RoleHierarchyImpl();
+		manager.setRoleHierarchy(roleHierarchy);
+		assertThat(manager).extracting("delegate").extracting("roleHierarchy").isEqualTo(roleHierarchy);
+	}
+
+	@Test
+	public void getRoleHierarchyWhenNotSetThenDefaultsToNullRoleHierarchy() {
+		AuthorityAuthorizationManager<Object> manager = AuthorityAuthorizationManager.hasRole("USER");
+		assertThat(manager).extracting("delegate").extracting("roleHierarchy").isInstanceOf(NullRoleHierarchy.class);
+	}
+
+	@Test
+	public void hasRoleWhenRoleHierarchySetThenGreaterRoleTakesPrecedence() {
+		AuthorityAuthorizationManager<Object> manager = AuthorityAuthorizationManager.hasRole("USER");
+		RoleHierarchyImpl roleHierarchy = new RoleHierarchyImpl();
+		roleHierarchy.setHierarchy("ROLE_ADMIN > ROLE_USER");
+		manager.setRoleHierarchy(roleHierarchy);
+		Supplier<Authentication> authentication = () -> new TestingAuthenticationToken("user", "password",
+				"ROLE_ADMIN");
+		Object object = new Object();
+		assertThat(manager.check(authentication, object).isGranted()).isTrue();
 	}
 
 }

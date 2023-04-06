@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2021 the original author or authors.
+ * Copyright 2002-2022 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,6 +49,7 @@ import org.opensaml.saml.saml2.core.Attribute;
 import org.opensaml.saml.saml2.core.AttributeStatement;
 import org.opensaml.saml.saml2.core.AttributeValue;
 import org.opensaml.saml.saml2.core.AuthnRequest;
+import org.opensaml.saml.saml2.core.AuthnStatement;
 import org.opensaml.saml.saml2.core.Conditions;
 import org.opensaml.saml.saml2.core.EncryptedAssertion;
 import org.opensaml.saml.saml2.core.EncryptedAttribute;
@@ -100,9 +101,11 @@ public final class TestOpenSamlObjects {
 
 	private static String DESTINATION = "https://localhost/login/saml2/sso/idp-alias";
 
+	private static String LOGOUT_DESTINATION = "http://localhost/logout/saml2/slo";
+
 	public static String RELYING_PARTY_ENTITY_ID = "https://localhost/saml2/service-provider-metadata/idp-alias";
 
-	private static String ASSERTING_PARTY_ENTITY_ID = "https://some.idp.test/saml2/idp";
+	public static String ASSERTING_PARTY_ENTITY_ID = "https://some.idp.test/saml2/idp";
 
 	private static SecretKey SECRET_KEY = new SecretKeySpec(
 			Base64.getDecoder().decode("shOnwNMoCv88HKMEa91+FlYoD5RNvzMTAL5LGxZKIFk="), "AES");
@@ -110,7 +113,7 @@ public final class TestOpenSamlObjects {
 	private TestOpenSamlObjects() {
 	}
 
-	static Response response() {
+	public static Response response() {
 		return response(DESTINATION, ASSERTING_PARTY_ENTITY_ID);
 	}
 
@@ -153,6 +156,9 @@ public final class TestOpenSamlObjects {
 		confirmationData.setRecipient(recipientUri);
 		subjectConfirmation.setSubjectConfirmationData(confirmationData);
 		assertion.getSubject().getSubjectConfirmations().add(subjectConfirmation);
+		AuthnStatement statement = build(AuthnStatement.DEFAULT_ELEMENT_NAME);
+		statement.setSessionIndex("session-index");
+		assertion.getAuthnStatements().add(statement);
 		return assertion;
 	}
 
@@ -198,6 +204,18 @@ public final class TestOpenSamlObjects {
 		authnRequest.setDestination(ASSERTING_PARTY_ENTITY_ID + "/SSO.saml2");
 		authnRequest.setAssertionConsumerServiceURL(DESTINATION);
 		return authnRequest;
+	}
+
+	public static LogoutRequest logoutRequest() {
+		Issuer issuer = build(Issuer.DEFAULT_ELEMENT_NAME);
+		issuer.setValue(ASSERTING_PARTY_ENTITY_ID);
+		NameID nameId = build(NameID.DEFAULT_ELEMENT_NAME);
+		nameId.setValue("user");
+		LogoutRequest logoutRequest = build(LogoutRequest.DEFAULT_ELEMENT_NAME);
+		logoutRequest.setIssuer(issuer);
+		logoutRequest.setDestination(LOGOUT_DESTINATION);
+		logoutRequest.setNameID(nameId);
+		return logoutRequest;
 	}
 
 	static Credential getSigningCredential(Saml2X509Credential credential, String entityId) {
@@ -292,6 +310,17 @@ public final class TestOpenSamlObjects {
 		return attribute;
 	}
 
+	static AttributeStatement customAttributeStatement(String attributeName, XMLObject customAttributeValue) {
+		AttributeStatementBuilder attributeStatementBuilder = new AttributeStatementBuilder();
+		AttributeBuilder attributeBuilder = new AttributeBuilder();
+		Attribute attribute = attributeBuilder.buildObject();
+		attribute.setName(attributeName);
+		attribute.getAttributeValues().add(customAttributeValue);
+		AttributeStatement attributeStatement = attributeStatementBuilder.buildObject();
+		attributeStatement.getAttributes().add(attribute);
+		return attributeStatement;
+	}
+
 	static List<AttributeStatement> attributeStatements() {
 		List<AttributeStatement> attributeStatements = new ArrayList<>();
 		AttributeStatementBuilder attributeStatementBuilder = new AttributeStatementBuilder();
@@ -312,6 +341,18 @@ public final class TestOpenSamlObjects {
 		name.setValue("John Doe");
 		nameAttr.getAttributeValues().add(name);
 		attrStmt1.getAttributes().add(nameAttr);
+		Attribute roleOneAttr = attributeBuilder.buildObject(); // gh-11042
+		roleOneAttr.setName("role");
+		XSString roleOne = new XSStringBuilder().buildObject(AttributeValue.DEFAULT_ELEMENT_NAME, XSString.TYPE_NAME);
+		roleOne.setValue("RoleOne");
+		roleOneAttr.getAttributeValues().add(roleOne);
+		attrStmt1.getAttributes().add(roleOneAttr);
+		Attribute roleTwoAttr = attributeBuilder.buildObject(); // gh-11042
+		roleTwoAttr.setName("role");
+		XSString roleTwo = new XSStringBuilder().buildObject(AttributeValue.DEFAULT_ELEMENT_NAME, XSString.TYPE_NAME);
+		roleTwo.setValue("RoleTwo");
+		roleTwoAttr.getAttributeValues().add(roleTwo);
+		attrStmt1.getAttributes().add(roleTwoAttr);
 		Attribute ageAttr = attributeBuilder.buildObject();
 		ageAttr.setName("age");
 		XSInteger age = new XSIntegerBuilder().buildObject(AttributeValue.DEFAULT_ELEMENT_NAME, XSInteger.TYPE_NAME);
@@ -357,6 +398,26 @@ public final class TestOpenSamlObjects {
 		NameID nameId = nameIdBuilder.buildObject();
 		nameId.setValue("user");
 		logoutRequest.setNameID(nameId);
+		IssuerBuilder issuerBuilder = new IssuerBuilder();
+		Issuer issuer = issuerBuilder.buildObject();
+		issuer.setValue(registration.getAssertingPartyDetails().getEntityId());
+		logoutRequest.setIssuer(issuer);
+		logoutRequest.setDestination(registration.getSingleLogoutServiceLocation());
+		return logoutRequest;
+	}
+
+	public static LogoutRequest assertingPartyLogoutRequestNameIdInEncryptedId(RelyingPartyRegistration registration) {
+		LogoutRequestBuilder logoutRequestBuilder = new LogoutRequestBuilder();
+		LogoutRequest logoutRequest = logoutRequestBuilder.buildObject();
+		logoutRequest.setID("id");
+		NameIDBuilder nameIdBuilder = new NameIDBuilder();
+		NameID nameId = nameIdBuilder.buildObject();
+		nameId.setValue("user");
+		logoutRequest.setNameID(null);
+		Saml2X509Credential credential = registration.getAssertingPartyDetails().getEncryptionX509Credentials()
+				.iterator().next();
+		EncryptedID encrypted = encrypted(nameId, credential);
+		logoutRequest.setEncryptedID(encrypted);
 		IssuerBuilder issuerBuilder = new IssuerBuilder();
 		Issuer issuer = issuerBuilder.buildObject();
 		issuer.setValue(registration.getAssertingPartyDetails().getEntityId());
